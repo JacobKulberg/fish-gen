@@ -163,10 +163,10 @@ def export_frames(sprite: FishSprite, out_dir: Path, scale: int = 1) -> list[Pat
 
 def export_all(sprite: FishSprite, out_dir: Path, formats: list[str], gif_scale: int = 4,
                frame_scale: int = 1, background: str | None = None, padding: int = 0,
-               godot_dir: str = "res://") -> list[Path]:
+               godot_dir: str = "res://", stem: str | None = None) -> list[Path]:
     """Export a fish in the requested formats into ``out_dir``. Returns written files."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"fish_{sprite.genome.seed}"
+    stem = stem or f"fish_{sprite.genome.seed}"
     written: list[Path] = []
     rects = None
     if "sheet" in formats or "godot" in formats:

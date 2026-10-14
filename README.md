@@ -11,7 +11,21 @@ swim_right ──▶ turn_right_to_left ──▶ swim_left ──▶ turn_left_
 The turn is a 3/4 rotation: the fish swings its head towards the viewer, shows its face,
 and comes out facing the other way, with its body curving behind its head.
 
-## Install
+## Quick start: the designer window
+
+```sh
+py gui.py          # Windows   (python3 gui.py elsewhere)
+```
+
+That's it. The first run creates `.venv` and installs numpy + Pillow by itself.
+
+Pick a **species** (Goldfish, Clownfish, Angelfish, Tuna, Eel, Pufferfish, Betta, Neon tetra,
+Koi, Discus, Mackerel, Piranha, or Random with a chosen body type), then tweak anything on the
+tabs - body shape, eye, every fin, colours and pattern, sprite size and frame counts. The fish
+re-renders live on the right. The **Export** tab writes the same files as `fishgen generate`
+(named after the species and seed, e.g. `out/koi_5/koi_5.png`).
+
+## Install (command line)
 
 ```sh
 python -m venv .venv
@@ -22,7 +36,9 @@ pip install -e ".[preview,dev]"
 ## Usage
 
 ```sh
+fishgen                                         # opens the designer window
 fishgen generate --seed 42                      # all formats into ./out/fish_42/
+fishgen generate --species Clownfish --count 5  # five different clownfish
 fishgen generate --count 20 --size 48 --out fish    # 20 fish, 48x48 sprites
 fishgen generate --seed 7 --size 64x32 --formats sheet,godot
 fishgen generate --seed 7 --formats gif --scale 8 --bg "#1d3557"
@@ -36,6 +52,7 @@ fishgen preview --fish 5                        # live aquarium window
 | option | default | |
 |---|---|---|
 | `--seed N` | random | same seed = same fish |
+| `--species NAME` | random | preset fish type (also works with `preview` and `gui`) |
 | `--size N` or `WxH` | `32` | sprite size in pixels |
 | `--swim-frames` | `8` | frames per swim cycle |
 | `--turn-frames` | `10` | frames per turn-around |
@@ -101,6 +118,7 @@ func _on_finished():  # turns don't loop
 
 1. **Genome** (`genome.py`) - a seeded RNG picks an archetype (slender, torpedo, classic,
    deep, round) and then every proportion, fin, tail shape, colour and pattern.
+   Species presets (`species.py`) fix the archetype and override some genes; the seed varies the rest.
 2. **Model** (`geometry.py`) - the body is a 3D tube lofted along a spine; fins are flat
    meshes attached to it. A pose bends the spine (travelling swim wave + tail flex + a
    C-curve while turning) and rotates it around the vertical axis.

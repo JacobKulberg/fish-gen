@@ -105,3 +105,27 @@ def test_cli_exports_everything(tmp_path):
     assert (tmp_path / "fish_5.png").exists()
     assert (tmp_path / "gif" / "showcase.gif").exists()
     assert len(list((tmp_path / "frames").rglob("*.png"))) == tres.count("[sub_resource")
+
+
+def test_species_presets_render():
+    from fishgen.species import SPECIES_NAMES, make_genome
+
+    for name in SPECIES_NAMES:
+        s = generate(1, 24, 24, genome=make_genome(name, 1))
+        assert (s.animations["swim_right"].indexed[0] != TRANSPARENT).sum() > 20
+
+
+def test_forced_archetype_and_dict_roundtrip():
+    g = FishGenome.random(9, archetype="deep")
+    assert g.height >= 0.5
+    g.colors.accent_color = "#ff0000"
+    assert FishGenome.from_dict(json.loads(json.dumps(g.to_dict()))) == g
+
+
+def test_colour_overrides_reach_palette():
+    from fishgen.palette import ACCENT, FIN, build_palette
+
+    g = FishGenome.random(4)
+    g.colors.fin_color, g.colors.accent_color = "#102030", "#a0b0c0"
+    pal = build_palette(g.colors)
+    assert pal.colors[FIN] == (0x10, 0x20, 0x30) and pal.colors[ACCENT] == (0xa0, 0xb0, 0xc0)

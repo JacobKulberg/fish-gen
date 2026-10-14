@@ -1,4 +1,4 @@
-"""Command line interface: ``fishgen generate`` and ``fishgen preview``."""
+"""Command line interface: ``fishgen gui``, ``fishgen generate`` and ``fishgen preview``."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .animation import generate
 from .export import FORMATS, export_all
+from .species import SPECIES_NAMES, make_genome
 
 
 def parse_size(text: str) -> tuple[int, int]:
@@ -39,6 +40,8 @@ def parse_formats(text: str) -> list[str]:
 
 def _add_render_args(p: argparse.ArgumentParser):
     p.add_argument("--seed", type=int, default=None, help="fish seed (random if omitted)")
+    p.add_argument("--species", default=None, choices=SPECIES_NAMES, metavar="NAME",
+                   help=f"fish type preset: {', '.join(SPECIES_NAMES)}")
     p.add_argument("--size", type=parse_size, default=(32, 32), metavar="N|WxH", help="sprite size (default 32)")
     p.add_argument("--swim-frames", type=int, default=8, help="frames per swim cycle (default 8)")
     p.add_argument("--turn-frames", type=int, default=10, help="frames per turn-around (default 10)")
@@ -52,8 +55,9 @@ def cmd_generate(args) -> int:
     out_root = Path(args.out)
     for seed in seeds:
         t0 = time.perf_counter()
+        genome = make_genome(args.species, seed) if args.species else None
         sprite = generate(seed, *args.size, swim_frames=args.swim_frames, turn_frames=args.turn_frames,
-                          fps=args.fps, pitch=args.pitch)
+                          fps=args.fps, pitch=args.pitch, genome=genome)
         out_dir = out_root / f"fish_{seed}" if args.count > 1 or not args.flat else out_root
         files = export_all(sprite, out_dir, args.formats, gif_scale=args.scale, frame_scale=args.frame_scale,
                            background=args.bg, padding=args.padding, godot_dir=args.godot_dir)
@@ -69,13 +73,27 @@ def cmd_preview(args) -> int:
         return 1
     seed = args.seed if args.seed is not None else random.randrange(1_000_000)
     run(seed=seed, size=args.size, count=args.fish, zoom=args.zoom, swim_frames=args.swim_frames,
-        turn_frames=args.turn_frames, fps=args.fps, pitch=args.pitch, out=Path(args.out))
+        turn_frames=args.turn_frames, fps=args.fps, pitch=args.pitch, out=Path(args.out),
+        species=args.species)
     return 0
+
+
+def cmd_gui(args) -> int:
+    from .gui import run
+    from .species import RANDOM
+
+    return run(seed=args.seed, species=args.species or RANDOM, out=Path(args.out))
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="fishgen", description="Procedural pixel-art fish generator.")
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command")
+
+    gu = sub.add_parser("gui", help="open the fish designer window (the default with no command)")
+    gu.add_argument("--seed", type=int, default=None, help="starting seed (random if omitted)")
+    gu.add_argument("--species", default=None, choices=SPECIES_NAMES, metavar="NAME", help="starting fish type")
+    gu.add_argument("--out", default="out", help="default export folder (default ./out)")
+    gu.set_defaults(func=cmd_gui)
 
     g = sub.add_parser("generate", help="generate fish and export them")
     _add_render_args(g)
@@ -99,6 +117,8 @@ def main(argv: list[str] | None = None) -> int:
     pv.set_defaults(func=cmd_preview)
 
     args = parser.parse_args(argv)
+    if args.command is None:
+        args = parser.parse_args(["gui"])
     return args.func(args)
 
 

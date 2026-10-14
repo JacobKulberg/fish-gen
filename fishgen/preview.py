@@ -15,6 +15,7 @@ import pygame
 
 from .animation import SHOWCASE_ORDER, FishSprite, generate
 from .export import FORMATS, export_all
+from .species import make_genome
 
 HELP = "SPACE new fish   </> seed -/+   T turn   G sheet   P pause   +/- zoom   E export   ESC quit"
 WATER_TOP = (34, 86, 128)
@@ -91,7 +92,7 @@ class TankFish:
 
 class Preview:
     def __init__(self, seed: int, size, count: int, zoom: int, swim_frames: int, turn_frames: int,
-                 fps: float, pitch: float, out: Path):
+                 fps: float, pitch: float, out: Path, species: str | None = None):
         pygame.init()
         pygame.display.set_caption("fishgen preview")
         self.screen = pygame.display.set_mode((1100, 650), pygame.RESIZABLE)
@@ -103,6 +104,7 @@ class Preview:
         self.zoom = zoom
         self.opts = dict(swim_frames=swim_frames, turn_frames=turn_frames, fps=fps, pitch=pitch)
         self.out = out
+        self.species = species
         self.paused = False
         self.show_sheet = False
         self.message = ""
@@ -118,7 +120,9 @@ class Preview:
     def spawn(self):
         self.fish = []
         for i in range(self.count):
-            sprite = generate(self.seed + i, *self.size, **self.opts)
+            seed = self.seed + i
+            genome = make_genome(self.species, seed) if self.species else None
+            sprite = generate(seed, *self.size, genome=genome, **self.opts)
             self.fish.append(TankFish(sprite, self.zoom, self.bounds(), self.rng))
         seeds = f"{self.seed}" if self.count == 1 else f"{self.seed}..{self.seed + self.count - 1}"
         pygame.display.set_caption(f"fishgen preview - seed {seeds}")
@@ -255,5 +259,5 @@ class Preview:
 
 
 def run(seed: int, size=(32, 32), count: int = 1, zoom: int = 4, swim_frames: int = 8, turn_frames: int = 10,
-        fps: float = 10.0, pitch: float = 0.25, out: Path = Path("out")):
-    Preview(seed, size, count, zoom, swim_frames, turn_frames, fps, pitch, out).run()
+        fps: float = 10.0, pitch: float = 0.25, out: Path = Path("out"), species: str | None = None):
+    Preview(seed, size, count, zoom, swim_frames, turn_frames, fps, pitch, out, species).run()

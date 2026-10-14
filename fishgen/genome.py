@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass, field
 TAIL_SHAPES = ("forked", "rounded", "truncate", "lunate", "pointed", "fan")
 FIN_SHAPES = ("triangle", "rounded", "sail", "long")
 PATTERNS = ("none", "stripes", "spots", "lateral", "saddle", "gradient")
+ARCHETYPES = ("slender", "torpedo", "classic", "deep", "round")
 
 
 @dataclass
@@ -31,6 +32,9 @@ class ColorGenes:
     pattern: str
     pattern_scale: float  # stripe count / spot density
     pattern_offset: float
+    # Optional exact colours ("#rrggbb") that replace the hue-derived fin / pattern colours.
+    fin_color: str | None = None
+    accent_color: str | None = None
 
 
 @dataclass
@@ -63,15 +67,17 @@ class FishGenome:
     colors: ColorGenes = field(default=None)  # type: ignore[assignment]
 
     @classmethod
-    def random(cls, seed: int) -> "FishGenome":
+    def random(cls, seed: int, archetype: str | None = None) -> "FishGenome":
+        """Random fish for ``seed``. ``archetype`` (one of ARCHETYPES) forces the body type."""
         r = random.Random(seed)
 
         # Body archetype controls proportions so we get believable variety
         # (eel-ish, torpedo, classic, deep-bodied disc) instead of noise.
-        archetype = r.choices(
-            ["slender", "torpedo", "classic", "deep", "round"],
-            weights=[1, 3, 4, 2, 1.5],
-        )[0]
+        # Always draw it so a forced archetype doesn't shift the rest of the RNG stream.
+        drawn = r.choices(ARCHETYPES, weights=[1, 3, 4, 2, 1.5])[0]
+        if archetype is not None and archetype not in ARCHETYPES:
+            raise ValueError(f"unknown archetype {archetype!r}; choose from {', '.join(ARCHETYPES)}")
+        archetype = archetype or drawn
         height = {
             "slender": r.uniform(0.2, 0.26),
             "torpedo": r.uniform(0.24, 0.34),
@@ -141,3 +147,11 @@ class FishGenome:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "FishGenome":
+        d = dict(d)
+        for name in ("dorsal", "anal", "pelvic"):
+            d[name] = FinGenes(**d[name])
+        d["colors"] = ColorGenes(**d["colors"])
+        return cls(**d)

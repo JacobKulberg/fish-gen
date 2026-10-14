@@ -43,6 +43,14 @@ def _rgb(h: float, s: float, v: float) -> RGB:
     return (round(r * 255), round(g * 255), round(b * 255))
 
 
+def hex_rgb(color: str) -> RGB:
+    """'#rrggbb' -> (r, g, b)."""
+    c = color.strip().lstrip("#")
+    if len(c) != 6:
+        raise ValueError(f"expected a #rrggbb colour, got {color!r}")
+    return int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+
+
 @dataclass
 class Palette:
     colors: list[RGB]  # indexed by the slot constants above
@@ -72,15 +80,22 @@ def build_palette(g: ColorGenes) -> Palette:
     belly = _rgb(_shift_hue(h, 0.15, 0.04), s * (1 - 0.75 * bl), min(1.0, v + (1 - v) * bl * 0.9 + 0.05))
 
     fh = h + g.fin_hue_shift
-    if abs(g.fin_hue_shift) < 0.15:
+    if g.fin_color:
+        fin = hex_rgb(g.fin_color)
+        fh, fs, fv = colorsys.rgb_to_hsv(*(c / 255 for c in fin))
+        fin_dark = _rgb(_shift_hue(fh, 0.7, 0.05), fs + 0.1, fv * 0.62)
+    elif abs(g.fin_hue_shift) < 0.15:
         # Same hue family as the body: fins read as thinner/translucent, so go lighter.
         fin = _rgb(_shift_hue(fh, 0.15, 0.03), s * 0.75, min(1.0, v * 1.05 + 0.12))
     else:
         fin = _rgb(fh, s * 0.9, min(1.0, v * 0.95 + 0.05))
-    fin_dark = _rgb(_shift_hue(fh, 0.7, 0.05), s + 0.1, v * 0.62)
+    if not g.fin_color:
+        fin_dark = _rgb(_shift_hue(fh, 0.7, 0.05), s + 0.1, v * 0.62)
 
     ah = h + g.accent_hue_shift
-    if abs(g.accent_hue_shift) < 0.2:
+    if g.accent_color:
+        accent = hex_rgb(g.accent_color)
+    elif abs(g.accent_hue_shift) < 0.2:
         # Same-ish hue: make the pattern contrast via value instead.
         accent = _rgb(ah, min(1.0, s + 0.15), v * 0.5)
     else:
