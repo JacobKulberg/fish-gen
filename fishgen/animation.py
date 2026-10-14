@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .genome import FishGenome
-from .geometry import Pose
+from .geometry import Pose, turn_heading
 from .render import FishRenderer
 
 
@@ -41,26 +41,27 @@ def swim_poses(frames: int, yaw: float, pitch: float) -> list[Pose]:
 
 
 def turn_poses(frames: int, swim_frames: int, start_yaw: float, end_yaw: float, pitch: float,
-               bend: float = 0.9) -> list[Pose]:
-    """Rotate through the viewer (the fish shows its face mid-turn).
+               lag: float = 0.9) -> list[Pose]:
+    """Turn through the viewer the way a fish does: the head swings round first
+    and the body follows it, folding into a U that rolls down to the tail.
 
     The tail-beat phase keeps advancing at the swim rate and lands on a whole
     number of cycles, so the turn starts and ends in step with the swim loop.
     """
     cycles = max(1, round(frames / swim_frames))
-    direction = 1.0 if end_yaw > start_yaw else -1.0
     poses = []
     for j in range(frames):
         t = (j + 0.5) / frames
-        # Slightly slower through the middle so the face-on frames get screen time.
-        e = t + 0.25 * math.sin(2 * math.pi * t) / (2 * math.pi)
         mid = math.sin(math.pi * t)
         poses.append(Pose(
             phase=(j * cycles / frames) % 1.0,
-            yaw=start_yaw + (end_yaw - start_yaw) * e,
-            # Head leads, body lags behind: a C-curve that peaks mid-turn.
-            bend=direction * bend * mid,
-            amplitude=1.0 - 0.55 * mid,
+            yaw=float(turn_heading(t, 0.0, start_yaw, end_yaw, lag)),
+            turn=t,
+            turn_from=start_yaw,
+            turn_to=end_yaw,
+            turn_lag=lag,
+            # The tail beat eases off while the body folds.
+            amplitude=1.0 - 0.6 * mid,
             pitch=pitch,
         ))
     return poses

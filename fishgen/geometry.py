@@ -5,8 +5,10 @@ Rest ("local") space uses three coordinates:
     y  up
     z  sideways (out of the fish's right flank, towards the viewer when facing right)
 
-A Pose bends the spine (swimming wave + turning C-curve) and rotates the fish
-around the vertical axis (yaw). The posed mesh is then projected orthographically
+A Pose bends the spine (swimming wave) and points it along a heading (yaw).
+Turns are follow-the-leader: the head swings round first and each point along
+the spine follows the same path a moment later, so the body folds into a U
+that travels down to the tail instead of the fish spinning like a rigid model. The posed mesh is then projected orthographically
 with a slight downward camera pitch, so lateral motion reads in a side view.
 """
 
@@ -39,10 +41,26 @@ N_ATTRS = 3
 @dataclass
 class Pose:
     phase: float = 0.0  # swim cycle, 0..1 (wraps)
-    yaw: float = 0.0  # 0 = facing right, pi = facing left, pi/2 = facing the viewer
-    bend: float = 0.0  # C-curve of the spine in radians per body length (turning)
+    yaw: float = 0.0  # head heading: 0 = facing right, pi = facing left, pi/2 = facing the viewer
+    # Turning (follow-the-leader): progress 0..1 from turn_from to turn_to, or None when
+    # not turning. ``yaw`` should then hold the head's heading (see turn_heading).
+    turn: float | None = None
+    turn_from: float = 0.0
+    turn_to: float = 0.0
+    turn_lag: float = 0.9  # how far the tail trails the head, as a fraction of the turn
     amplitude: float = 1.0  # multiplier on the swim wave
     pitch: float = 0.25  # camera tilt, radians (looking slightly down on the fish)
+
+
+def turn_heading(progress: float, along, start: float, end: float, lag: float):
+    """Heading of the spine point ``along`` (0 = nose, 1 = tail tip) at turn ``progress``.
+
+    Each point runs the same eased heading change as the head, delayed by
+    ``lag * along``, so the fold rolls from the head down to the tail.
+    """
+    s = np.clip(progress * (1.0 + lag) - lag * np.asarray(along, dtype=float), 0.0, 1.0)
+    ease = s * s * (3 - 2 * s)  # smoothstep
+    return start + (end - start) * ease
 
 
 @dataclass
@@ -247,7 +265,11 @@ class FishModel:
         wave += amp * 0.9 * tail * np.sin(cyc - 2 * math.pi * g.wave_count - 0.9)
         # The head yaws a little against the tail beat (as real fish do).
         head_wobble = 0.12 * amp * math.sin(cyc + math.pi * 0.85)
-        heading = pose.yaw + head_wobble + wave - pose.bend * a
+        if pose.turn is None:
+            base = pose.yaw
+        else:
+            base = turn_heading(pose.turn, a / self.tail_end, pose.turn_from, pose.turn_to, pose.turn_lag)
+        heading = base + head_wobble + wave
         da = np.diff(a)
         mid = 0.5 * (heading[1:] + heading[:-1])
         step = np.stack([np.cos(mid), np.zeros_like(mid), np.sin(mid)], -1) * da[:, None]
