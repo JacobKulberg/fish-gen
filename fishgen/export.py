@@ -166,7 +166,7 @@ def export_all(sprite: FishSprite, out_dir: Path, formats: list[str], gif_scale:
                godot_dir: str = "res://", stem: str | None = None) -> list[Path]:
     """Export a fish in the requested formats into ``out_dir``. Returns written files."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    stem = stem or f"fish_{sprite.genome.seed}"
+    stem = stem or f"{sprite.genome.kind}_{sprite.genome.seed}"
     written: list[Path] = []
     rects = None
     if "sheet" in formats or "godot" in formats:

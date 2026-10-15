@@ -8,7 +8,7 @@ from typing import Iterable
 import numpy as np
 
 from . import palette as P
-from .geometry import BODY, CAUDAL, FAR_PARTS, FIN_PARTS, FishModel, Pose
+from .geometry import ARM, BODY, CAUDAL, FAR_PARTS, FIN_PARTS, SKIN_PARTS, WING_FAR, WING_PARTS, FishModel, Pose
 from .genome import FishGenome
 from .raster import EMPTY_DEPTH, rasterize
 
@@ -43,9 +43,10 @@ class FishRenderer:
         1px margin for the outline), keeping the fish centred."""
         ext_x = ext_y = 1e-6
         for pose in poses:
-            cam, *_ = self.model.posed(pose)
-            ext_x = max(ext_x, np.abs(cam[:, 0]).max())
-            ext_y = max(ext_y, np.abs(cam[:, 1]).max())
+            cam, _, _, _, lines = self.model.posed(pose)
+            pts = np.concatenate([cam, lines.reshape(-1, 3)])
+            ext_x = max(ext_x, np.abs(pts[:, 0]).max())
+            ext_y = max(ext_y, np.abs(pts[:, 1]).max())
         sx = (self.width / 2 - 1.5) / ext_x
         sy = (self.height / 2 - 1.5) / ext_y
         return min(sx, sy)
@@ -55,7 +56,7 @@ class FishRenderer:
         """Render a pose to an (h, w) array of palette slot indices."""
         g = self.genome
         model = self.model
-        cam, normals, eyes, eye_axes = model.posed(pose)
+        cam, normals, eyes, eye_axes, lines = model.posed(pose)
         s = self.scale
         cx, cy = self.width / 2, self.height / 2
         screen = np.stack([cx + cam[:, 0] * s, cy - cam[:, 1] * s, cam[:, 2] * s], -1)
@@ -67,13 +68,20 @@ class FishRenderer:
         n = attr[..., 0:3]
         n = n / (np.linalg.norm(n, axis=-1, keepdims=True) + 1e-9)
         is_fin = np.isin(part, FIN_PARTS)
-        # Fins are two-sided: always shade the face we're looking at.
-        n = np.where((is_fin & (n[..., 2] < 0))[..., None], -n, n)
+        is_wing = np.isin(part, WING_PARTS)
+        # Wing normals point up, so a wing facing the camera shows its back.
+        wing_top = is_wing & (n[..., 2] >= 0)
+        # Fins and wings are two-sided: always shade the face we're looking at.
+        n = np.where(((is_fin | is_wing) & (n[..., 2] < 0))[..., None], -n, n)
         light = n @ LIGHT
 
         out = np.zeros(part.shape, dtype=np.uint8)
-        body = part == BODY
+        body = np.isin(part, (BODY, ARM))
         out[body] = self._shade_body(attr, light, body, pose)
+        # Seen from above (rays), light the wings from the viewer so both wings shade alike
+        # through a flap; from the side keep the overhead light.
+        wing_light = n[..., 2] * 1.6 - 0.75 if g.camera_tilt > 0.5 else light
+        out[is_wing] = self._shade_wing(attr, wing_light, is_wing, wing_top, part)
         out[is_fin] = P.FIN
         # Fins on the far side of the body and fins facing away from the light are darker.
         out[np.isin(part, FAR_PARTS)] = P.FIN_DARK
@@ -81,6 +89,19 @@ class FishRenderer:
         # Darken where the tail joins the body so the two read as separate shapes.
         out[(part == CAUDAL) & (attr[..., 4] < 0.18)] = P.FIN_DARK
         self._fin_rays(out, part, attr)
+        if g.colors.fin_tips > 0:
+            out[is_fin & (attr[..., 4] > 1.0 - g.colors.fin_tips)] = P.ACCENT
+
+        # Arms and wings crossing over other skin: shade the far side of the edge
+        # so overlapping arms read as separate shapes instead of one blob.
+        skin = np.isin(part, SKIN_PARTS)
+        extra = np.isin(part, (ARM, *WING_PARTS))
+        if extra.any():
+            for dy, dx in N4:
+                np_ = _shift(part, dy, dx)
+                nd = _shift(depth, dy, dx, fill=EMPTY_DEPTH)
+                behind = skin & np.isin(np_, SKIN_PARTS) & (extra | np.isin(np_, (ARM, *WING_PARTS))) & (nd - depth > 2.0)
+                out[behind] = P.SHADOW
 
         # Depth edges: where a fin overlaps something behind it, or something
         # in front overlaps a fin, outline the fin's edge with the dark fin colour.
@@ -94,6 +115,7 @@ class FishRenderer:
             front = body & np.isin(np_, FIN_PARTS) & (depth - nd > thresh * 2)
             out[front & np.isin(np_, FAR_PARTS)] = P.SHADOW
 
+        self._draw_spines(out, depth, lines)
         self._draw_eyes(out, depth, eyes, eye_axes, pose)
         self._outline(out)
         return out
@@ -136,30 +158,81 @@ class FishRenderer:
 
         # Gill slit: a short curved line behind the eye, only when there is room.
         px_len = 1.0 / self.scale
-        if self.scale > 18:
+        if g.gill_slits == 1 and self.scale > 18:
             ga = g.eye_pos + 0.11 + 0.03 * (1 - v ** 2)
             gill = (np.abs(a - ga) < px_len * 0.55) & (np.abs(v) < 0.6) & (np.abs(w) > 0.4)
             res[gill] = P.SHADOW
+        elif g.gill_slits > 1 and self.scale > 12:
+            # Shark gill slits: a row of short upright lines, one pixel apart at least.
+            gap = max(0.022, 2.0 * px_len)
+            for i in range(int(g.gill_slits)):
+                ga = g.eye_pos + 0.09 + i * gap
+                if ga > g.peak:
+                    break
+                ga = ga + 0.01 * (1 - v ** 2)
+                gill = (np.abs(a - ga) < px_len * 0.55) & (v > -0.45) & (v < 0.35) & (np.abs(w) > 0.4)
+                res[gill] = P.SHADOW
         return res
+
+    def _shade_wing(self, attr, light, mask, top, part) -> np.ndarray:
+        """Wings show the back colours (and pattern) on top and the belly colour underneath."""
+        c = self.genome.colors
+        a = attr[..., 3][mask]
+        r = attr[..., 4][mask]
+        side = attr[..., 5][mask]
+        li = light[mask]
+        res = np.full(a.shape, P.BASE, dtype=np.uint8)
+        res[li > 0.84] = P.HIGHLIGHT
+        res[li < 0.18] = P.SHADOW
+        if c.pattern in ("spots", "rings"):
+            res[self._spots(a * 1.6, side * r * 0.9, rings=c.pattern == "rings")] = P.ACCENT
+        under = ~top[mask]
+        res[under] = P.BELLY if c.belly_lightness > 0.25 else P.SHADOW
+        res[under & (part[mask] == WING_FAR) & (li < 0.3)] = P.SHADOW
+        return res
+
+    def _spots(self, ua_coord, ub_coord, rings: bool = False) -> np.ndarray:
+        """Hash-placed round spots on a 2D surface parameterisation."""
+        c = self.genome.colors
+        cells = 5 + int(c.pattern_scale * 6)
+        ua, ub = ua_coord * cells + c.pattern_offset, ub_coord * cells
+        ia, ib = np.floor(ua), np.floor(ub)
+        h = np.sin(ia * 12.9898 + ib * 78.233 + self.genome.seed) * 43758.5453
+        jit = np.mod(h, 1.0)
+        fa, fb = ua - ia - 0.5, ub - ib - 0.5 + (jit - 0.5) * 0.4
+        has = np.mod(h * 7.0, 1.0) < 0.5
+        d2 = fa * fa + fb * fb
+        if rings:
+            # Hollow rings when there are pixels enough to show the hole, else solid spots.
+            hole = 0.012 if self.scale * 0.6 / cells > 3.0 else -1.0
+            return has & (d2 < 0.06) & (d2 > hole)
+        return has & (d2 < 0.05)
 
     def _pattern(self, a, v, w, mask) -> np.ndarray:
         c = self.genome.colors
         kind = c.pattern
-        body = a > self.genome.eye_pos + 0.08  # leave the face clean
+        eye = self.genome.eye_pos
+        # Leave the face clean (cephalopods have their face behind the mantle).
+        body = (a > eye + 0.08) | (a < eye - 0.25)
         if kind == "stripes":
             count = 3 + int(c.pattern_scale * 4)
             return body & (a < 0.95) & (np.mod((a - c.pattern_offset) * count, 1.0) < 0.32) & (v > -0.55)
-        if kind == "spots":
-            cells = 5 + int(c.pattern_scale * 6)
+        if kind in ("spots", "rings"):
             # Spots live on the surface: use (a, angle) so they wrap around the body.
             ang = np.arctan2(v, w) / math.pi  # -1..1
-            ua, ub = a * cells + c.pattern_offset, ang * cells * 0.6
-            ia, ib = np.floor(ua), np.floor(ub)
-            h = np.sin(ia * 12.9898 + ib * 78.233 + self.genome.seed) * 43758.5453
-            jit = np.mod(h, 1.0)
-            fa, fb = ua - ia - 0.5, ub - ib - 0.5 + (jit - 0.5) * 0.4
-            has = np.mod(h * 7.0, 1.0) < 0.5
-            return body & has & (fa * fa + fb * fb < 0.05) & (v > -0.5)
+            return body & self._spots(a, ang * 0.6, rings=kind == "rings") & (v > -0.5)
+        if kind == "tiger":
+            # Broken dark bars over the back, fading out towards the belly and the tail.
+            count = 6 + int(c.pattern_scale * 8)
+            u = (a - c.pattern_offset) * count
+            wobble = 0.12 * np.sin(v * 5.0 + np.floor(u) * 2.3)
+            bars = np.mod(u + wobble, 1.0) < 0.3
+            return body & bars & (a > 0.25) & (a < 0.98) & (v > 0.25 - 0.35 * a)
+        if kind == "orca":
+            # White eye patch behind the eye and a white flank sweep rising from the belly.
+            e = ((a - (eye + 0.13)) / 0.07) ** 2 + ((v - 0.35) / 0.18) ** 2 < 1.0
+            flank = (a > 0.45) & (a < 0.8) & (v < -0.15 + 0.35 * np.sin(np.clip((a - 0.45) / 0.35, 0, 1) * math.pi))
+            return (e & (np.abs(w) > 0.2)) | (flank & (v < 0.3))
         if kind == "lateral":
             return body & (v > -0.1 - 0.2 * c.pattern_scale) & (v < 0.15)
         if kind == "saddle":
@@ -182,11 +255,49 @@ class FishRenderer:
         streak = rays & (np.mod(m * count, 1.0) < 0.22) & (r > 0.3) & (out == P.FIN)
         out[streak] = P.FIN_DARK
 
+    def _draw_spines(self, out, depth, lines):
+        """Urchin spines: 1px depth-tested lines, light where they point up or at the viewer."""
+        if not len(lines):
+            return
+        s = self.scale
+        cx, cy = self.width / 2, self.height / 2
+        h, w = out.shape
+        for base, tip in lines:
+            x0, y0, z0 = cx + base[0] * s, cy - base[1] * s, base[2] * s
+            x1, y1, z1 = cx + tip[0] * s, cy - tip[1] * s, tip[2] * s
+            d = tip - base
+            slot = P.FIN if (d[1] * 0.6 + d[2]) / (np.linalg.norm(d) + 1e-9) > -0.1 else P.FIN_DARK
+            steps = int(max(abs(x1 - x0), abs(y1 - y0)) * 1.5) + 2
+            for t in np.linspace(0.0, 1.0, steps):
+                ix, iy = int(math.floor(x0 + (x1 - x0) * t)), int(math.floor(y0 + (y1 - y0) * t))
+                z = z0 + (z1 - z0) * t
+                if 0 <= ix < w and 0 <= iy < h and z > depth[iy, ix] - 0.5:
+                    out[iy, ix] = slot
+                    depth[iy, ix] = z
+
     def _draw_eyes(self, out, depth, eyes, axes, pose):
+        if not self.model.eyes:
+            return
         s = self.scale
         cx, cy = self.width / 2, self.height / 2
         r = self.model.eyes[0].radius * s
         h, w = out.shape
+        if self.genome.eye_style == "dark":
+            # Whales, sharks, rays: a plain dark eye, no white.
+            for e, ax in zip(eyes, axes):
+                if ax[2] < -0.2:
+                    continue
+                ex, ey, ez = cx + e[0] * s, cy - e[1] * s, e[2] * s
+                ix, iy = int(math.floor(ex)), int(math.floor(ey))
+                if not (0 <= ix < w and 0 <= iy < h) or depth[iy, ix] > ez + max(1.0, r):
+                    continue
+                rr = max(0.5, min(r, 3.0) * 0.6)
+                for yy in range(iy - 3, iy + 4):
+                    for xx in range(ix - 3, ix + 4):
+                        if 0 <= xx < w and 0 <= yy < h and out[yy, xx] != P.TRANSPARENT \
+                                and math.hypot(xx + 0.5 - ex, yy + 0.5 - ey) <= rr + 0.25:
+                            out[yy, xx] = P.OUTLINE
+            return
         for e, ax in zip(eyes, axes):
             if ax[2] < -0.2:  # facing away from the camera
                 continue

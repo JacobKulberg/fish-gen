@@ -129,3 +129,102 @@ def test_colour_overrides_reach_palette():
     g.colors.fin_color, g.colors.accent_color = "#102030", "#a0b0c0"
     pal = build_palette(g.colors)
     assert pal.colors[FIN] == (0x10, 0x20, 0x30) and pal.colors[ACCENT] == (0xa0, 0xb0, 0xc0)
+
+
+def test_every_species_fits_canvas():
+    from fishgen.species import SPECIES_NAMES, make_genome
+
+    for name in SPECIES_NAMES:
+        s = generate(2, 32, 32, genome=make_genome(name, 2))
+        for anim in s.animations.values():
+            for idx in anim.indexed:
+                assert (idx != TRANSPARENT).sum() > 20, name
+                # Only the outline may reach the canvas edge: nothing is cut off.
+                border = np.concatenate([idx[0], idx[-1], idx[:, 0], idx[:, -1]])
+                assert np.isin(border, (TRANSPARENT, OUTLINE)).all(), name
+
+
+def test_old_genome_dicts_still_load():
+    d = FishGenome.random(3).to_dict()
+    for key in ("profile", "beak", "wings", "arms", "spines", "dorsal2", "hammer", "turn_lag"):
+        d.pop(key)
+    d["colors"].pop("fin_tips")
+    assert FishGenome.from_dict(d) == FishGenome.random(3)
+
+
+def test_whales_beat_up_and_down():
+    from fishgen.geometry import FishModel, Pose
+    from fishgen.species import make_genome
+
+    orca = FishModel(make_genome("Orca", 1))
+    _, pos, heading = orca.spine(Pose(phase=0.25))
+    assert np.ptp(pos[:, 1]) > 0.02 and np.ptp(heading) < 1e-9
+    fish = FishModel(FishGenome.random(1))
+    _, pos, heading = fish.spine(Pose(phase=0.25))
+    assert np.ptp(pos[:, 1]) == 0 and np.ptp(heading) > 0.02
+
+
+def test_new_body_parts_are_built():
+    from fishgen.geometry import ARM, WING_NEAR, FishModel
+    from fishgen.species import make_genome
+
+    assert (FishModel(make_genome("Octopus", 1)).mesh.tri_part == ARM).any()
+    assert (FishModel(make_genome("Cownose ray", 1)).mesh.tri_part == WING_NEAR).any()
+    assert (FishModel(make_genome("Hammerhead shark", 1)).mesh.tri_part == WING_NEAR).any()
+    urchin = FishModel(make_genome("Purple sea urchin", 1))
+    assert len(urchin._spine_lines(0.0)) == urchin.g.spines.count > 0 and not urchin.eyes
+
+
+# What every animal of a kind must have, whatever the seed.
+KIND_SIGNATURE = {
+    "fish": lambda g: g.tail_shape in ("forked", "rounded", "truncate", "lunate", "pointed", "fan")
+    and not g.wings.present and not g.arms.count and not g.spines.count and not g.swim_vertical,
+    "shark": lambda g: g.tail_shape == "heterocercal" and g.gill_slits == 5 and g.dorsal.present
+    and g.dorsal2.present and g.eye_style == "dark" and not g.wings.present,
+    "whale": lambda g: g.tail_shape == "flukes" and g.swim_vertical and not g.anal.present and g.gill_slits == 0,
+    "ray": lambda g: g.wings.present and g.tail_shape == "none" and g.camera_tilt > 0 and not g.arms.count,
+    "squid": lambda g: g.arms.count == 8 and g.wings.present and g.tail_shape == "none" and g.pulse > 0,
+    "octopus": lambda g: g.arms.count == 8 and g.arms.tentacles == 0 and g.tail_shape == "none",
+    "urchin": lambda g: g.profile == "sphere" and g.spines.count > 0 and g.eye_style == "none",
+}
+
+
+@pytest.mark.parametrize("kind", list(KIND_SIGNATURE))
+def test_random_animals_stay_true_to_their_kind(kind):
+    from fishgen.kinds import random_genome
+
+    genomes = [random_genome(kind, seed) for seed in range(60)]
+    for g in genomes:
+        assert g.kind == kind and KIND_SIGNATURE[kind](g), (kind, g.seed)
+    # ...while still varying from seed to seed.
+    assert len({round(g.colors.hue, 3) for g in genomes}) > 10
+
+
+def test_presets_belong_to_their_kind():
+    from fishgen.species import RANDOM, SPECIES_NAMES, kind_of, make_genome, species_for
+
+    for name in SPECIES_NAMES:
+        g = make_genome(name, 5)
+        assert g.kind == kind_of(name) and KIND_SIGNATURE[g.kind](g), name
+        assert name in species_for(g.kind)
+    assert make_genome(RANDOM, 5, kind="ray").kind == "ray"
+
+
+def test_cli_kind_option(tmp_path):
+    assert main(["generate", "--kind", "octopus", "--seed", "3", "--size", "24", "--out", str(tmp_path),
+                 "--formats", "sheet"]) == 0
+    data = json.loads((tmp_path / "octopus_3" / "octopus_3.json").read_text())
+    assert data["genome"]["kind"] == "octopus"
+    with pytest.raises(SystemExit):
+        main(["generate", "--kind", "shark", "--species", "Orca", "--out", str(tmp_path)])
+
+
+def test_every_species_varies_with_the_seed():
+    """Two animals of one species are never the same: shape and colour both change."""
+    from fishgen.species import SPECIES_NAMES, make_genome
+
+    for name in SPECIES_NAMES:
+        gs = [make_genome(name, seed) for seed in range(8)]
+        assert len({round(g.height, 4) for g in gs}) == 8, name
+        assert len({(round(g.colors.hue, 4), round(g.colors.value, 4)) for g in gs}) == 8, name
+        assert len({g.kind for g in gs}) == 1, name

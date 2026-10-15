@@ -10,7 +10,8 @@ from pathlib import Path
 
 from .animation import generate
 from .export import FORMATS, export_all
-from .species import SPECIES_NAMES, make_genome
+from .genome import KINDS
+from .species import RANDOM, SPECIES_NAMES, genome_for, kind_of
 
 
 def parse_size(text: str) -> tuple[int, int]:
@@ -39,9 +40,11 @@ def parse_formats(text: str) -> list[str]:
 
 
 def _add_render_args(p: argparse.ArgumentParser):
-    p.add_argument("--seed", type=int, default=None, help="fish seed (random if omitted)")
+    p.add_argument("--seed", type=int, default=None, help="seed (random if omitted)")
+    p.add_argument("--kind", default=None, choices=KINDS,
+                   help="kind of animal; a random one of this kind unless --species picks a preset")
     p.add_argument("--species", default=None, choices=SPECIES_NAMES, metavar="NAME",
-                   help=f"fish type preset: {', '.join(SPECIES_NAMES)}")
+                   help=f"preset (implies its kind): {', '.join(SPECIES_NAMES)}")
     p.add_argument("--size", type=parse_size, default=(32, 32), metavar="N|WxH", help="sprite size (default 32)")
     p.add_argument("--swim-frames", type=int, default=8, help="frames per swim cycle (default 8)")
     p.add_argument("--turn-frames", type=int, default=10, help="frames per turn-around (default 10)")
@@ -55,13 +58,13 @@ def cmd_generate(args) -> int:
     out_root = Path(args.out)
     for seed in seeds:
         t0 = time.perf_counter()
-        genome = make_genome(args.species, seed) if args.species else None
+        genome = genome_for(seed, args.species, args.kind)
         sprite = generate(seed, *args.size, swim_frames=args.swim_frames, turn_frames=args.turn_frames,
                           fps=args.fps, pitch=args.pitch, genome=genome)
-        out_dir = out_root / f"fish_{seed}" if args.count > 1 or not args.flat else out_root
+        out_dir = out_root / f"{genome.kind}_{seed}" if args.count > 1 or not args.flat else out_root
         files = export_all(sprite, out_dir, args.formats, gif_scale=args.scale, frame_scale=args.frame_scale,
                            background=args.bg, padding=args.padding, godot_dir=args.godot_dir)
-        print(f"fish {seed}: {len(files)} files -> {out_dir}  ({time.perf_counter() - t0:.2f}s)")
+        print(f"{genome.kind} {seed}: {len(files)} files -> {out_dir}  ({time.perf_counter() - t0:.2f}s)")
     return 0
 
 
@@ -74,7 +77,7 @@ def cmd_preview(args) -> int:
     seed = args.seed if args.seed is not None else random.randrange(1_000_000)
     run(seed=seed, size=args.size, count=args.fish, zoom=args.zoom, swim_frames=args.swim_frames,
         turn_frames=args.turn_frames, fps=args.fps, pitch=args.pitch, out=Path(args.out),
-        species=args.species)
+        species=args.species, kind=args.kind)
     return 0
 
 
@@ -82,7 +85,9 @@ def cmd_gui(args) -> int:
     from .gui import run
     from .species import RANDOM
 
-    return run(seed=args.seed, species=args.species or RANDOM, out=Path(args.out))
+    species = args.species or RANDOM
+    kind = args.kind or (kind_of(species) if species != RANDOM else "fish")
+    return run(seed=args.seed, species=species, out=Path(args.out), kind=kind)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -91,7 +96,8 @@ def main(argv: list[str] | None = None) -> int:
 
     gu = sub.add_parser("gui", help="open the fish designer window (the default with no command)")
     gu.add_argument("--seed", type=int, default=None, help="starting seed (random if omitted)")
-    gu.add_argument("--species", default=None, choices=SPECIES_NAMES, metavar="NAME", help="starting fish type")
+    gu.add_argument("--kind", default=None, choices=KINDS, help="starting kind of animal")
+    gu.add_argument("--species", default=None, choices=SPECIES_NAMES, metavar="NAME", help="starting preset")
     gu.add_argument("--out", default="out", help="default export folder (default ./out)")
     gu.set_defaults(func=cmd_gui)
 
@@ -119,6 +125,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command is None:
         args = parser.parse_args(["gui"])
+    if args.species not in (None, RANDOM) and args.kind not in (None, kind_of(args.species)):
+        parser.error(f"--species {args.species} is a {kind_of(args.species)}, not a {args.kind}")
     return args.func(args)
 
 

@@ -23,9 +23,10 @@ from PIL import Image, ImageTk
 
 from .animation import SHOWCASE_ORDER, FishSprite, generate
 from .export import FORMATS, export_all
-from .genome import ARCHETYPES, FIN_SHAPES, PATTERNS, TAIL_SHAPES, FishGenome
+from .genome import ALL_PATTERNS, ALL_TAIL_SHAPES, ARCHETYPES, EYE_STYLES, FIN_SHAPES, KINDS, WING_SHAPES, FishGenome
+from .kinds import kind_from_label, kind_label
 from .palette import ACCENT, BASE, FIN, build_palette
-from .species import RANDOM, SPECIES_NAMES, make_genome
+from .species import RANDOM, kind_of, make_genome, species_for
 
 ANY = "Any"
 SHOWCASE = "Showcase (full cycle)"
@@ -37,37 +38,54 @@ FORMAT_LABELS = {
     "frames": "Individual PNG frames",
 }
 
-# Gene controls, grouped by tab and section. Each entry is
-# (label, genome path, kind, extra) where kind is "float" (extra = (min, max)),
+# Gene controls, grouped by tab and section. A section is (title, kinds it applies to
+# or None for every kind, controls); sections for other kinds are hidden, and so is a
+# tab with nothing left to show. Each control is (label, genome path, type, extra)
+# where type is "float" (extra = (min, max)), "int" (extra = (min, max)),
 # "choice" (extra = options), "bool", or "color" (an optional #rrggbb override).
-GENE_TABS: list[tuple[str, list[tuple[str, list[tuple]]]]] = [
+SWIMMERS = ("fish", "shark", "whale", "ray", "squid", "octopus")
+FINNED = ("fish", "shark", "whale")
+GENE_TABS: list[tuple[str, list[tuple[str, tuple | None, list[tuple]]]]] = [
     ("Body", [
-        ("Shape", [
-            ("Body height", "height", "float", (0.12, 0.95)),
-            ("Thickness", "thickness", "float", (0.3, 0.9)),
+        ("Shape", None, [
+            ("Body height", "height", "float", (0.06, 0.95)),
+            ("Thickness", "thickness", "float", (0.3, 2.8)),
             ("Tallest point", "peak", "float", (0.2, 0.6)),
             ("Nose bluntness", "nose", "float", (0.2, 1.2)),
-            ("Rear taper", "taper", "float", (0.4, 2.0)),
-            ("Tail stem", "peduncle", "float", (0.08, 0.4)),
+            ("Rear taper", "taper", "float", (0.4, 3.0)),
+            ("Tail stem", "peduncle", "float", (0.08, 0.7)),
             ("Back arch", "back_arch", "float", (0.35, 0.75)),
         ]),
-        ("Eye", [
-            ("Position", "eye_pos", "float", (0.05, 0.25)),
-            ("Height", "eye_height", "float", (-0.2, 0.7)),
-            ("Size", "eye_size", "float", (0.1, 0.4)),
+        ("Shark head", ("shark",), [
+            ("Gill slits", "gill_slits", "int", (0, 7)),
+            ("Hammer head", "hammer", "float", (0.0, 0.25)),
         ]),
-        ("Swimming", [
-            ("Tail swing", "swim_amplitude", "float", (0.2, 1.0)),
+        ("Dolphin head", ("whale",), [
+            ("Beak", "beak", "float", (0.0, 0.15)),
+        ]),
+        ("Eye", SWIMMERS, [
+            ("Position", "eye_pos", "float", (0.02, 0.9)),
+            ("Height", "eye_height", "float", (-0.2, 0.8)),
+            ("Size", "eye_size", "float", (0.1, 0.4)),
+            ("Style", "eye_style", "choice", EYE_STYLES),
+        ]),
+        ("Swimming", SWIMMERS, [
+            ("Tail swing", "swim_amplitude", "float", (0.0, 1.0)),
             ("Body waves", "wave_count", "float", (0.3, 1.6)),
+            ("Mantle pulse", "pulse", "float", (0.0, 0.25)),
+        ]),
+        ("Motion & camera", None, [
+            ("Turn bend", "turn_lag", "float", (0.0, 1.2)),
+            ("Extra camera tilt", "camera_tilt", "float", (0.0, 0.8)),
         ]),
     ]),
     ("Fins", [
-        ("Tail fin", [
-            ("Shape", "tail_shape", "choice", TAIL_SHAPES),
+        ("Tail fin", FINNED, [
+            ("Shape", "tail_shape", "choice", ALL_TAIL_SHAPES),
             ("Length", "tail_length", "float", (0.1, 0.6)),
             ("Spread", "tail_spread", "float", (0.5, 2.0)),
         ]),
-        ("Dorsal fin (top)", [
+        ("Dorsal fin (top)", ("fish", "shark", "whale", "ray"), [
             ("Show", "dorsal.present", "bool", None),
             ("Shape", "dorsal.shape", "choice", FIN_SHAPES),
             ("Starts at", "dorsal.start", "float", (0.1, 0.9)),
@@ -75,7 +93,12 @@ GENE_TABS: list[tuple[str, list[tuple[str, list[tuple]]]]] = [
             ("Height", "dorsal.height", "float", (0.02, 0.5)),
             ("Sweep back", "dorsal.sweep", "float", (0.0, 1.0)),
         ]),
-        ("Anal fin (bottom)", [
+        ("Second dorsal fin", ("shark",), [
+            ("Show", "dorsal2.present", "bool", None),
+            ("Starts at", "dorsal2.start", "float", (0.4, 0.95)),
+            ("Height", "dorsal2.height", "float", (0.02, 0.2)),
+        ]),
+        ("Anal fin (bottom)", ("fish", "shark"), [
             ("Show", "anal.present", "bool", None),
             ("Shape", "anal.shape", "choice", FIN_SHAPES),
             ("Starts at", "anal.start", "float", (0.1, 0.9)),
@@ -83,30 +106,58 @@ GENE_TABS: list[tuple[str, list[tuple[str, list[tuple]]]]] = [
             ("Height", "anal.height", "float", (0.02, 0.5)),
             ("Sweep back", "anal.sweep", "float", (0.0, 1.0)),
         ]),
-        ("Side fins", [
-            ("Pectoral size", "pectoral_size", "float", (0.05, 0.3)),
+        ("Side fins", FINNED, [
+            ("Pectoral size", "pectoral_size", "float", (0.05, 0.4)),
+            ("Fin flutter", "pectoral_flap", "float", (0.0, 1.0)),
             ("Pelvic fins", "pelvic.present", "bool", None),
             ("Pelvic position", "pelvic.start", "float", (0.2, 0.6)),
             ("Pelvic size", "pelvic.height", "float", (0.03, 0.25)),
         ]),
     ]),
+    ("Wings & arms", [
+        ("Wings", ("ray", "squid", "octopus"), [
+            ("Show", "wings.present", "bool", None),
+            ("Shape", "wings.shape", "choice", WING_SHAPES),
+            ("Starts at", "wings.start", "float", (0.0, 0.8)),
+            ("Ends at", "wings.end", "float", (0.05, 1.0)),
+            ("Span", "wings.span", "float", (0.02, 0.8)),
+            ("Tip sweep", "wings.sweep", "float", (0.0, 1.0)),
+            ("Flap", "wings.flap", "float", (0.0, 1.0)),
+            ("Ripple", "wings.wave", "float", (0.0, 2.5)),
+        ]),
+        ("Arms", ("squid", "octopus"), [
+            ("Arms", "arms.count", "int", (0, 10)),
+            ("Arm length", "arms.length", "float", (0.1, 2.0)),
+            ("Thickness", "arms.thickness", "float", (0.01, 0.1)),
+            ("Tentacles", "arms.tentacles", "int", (0, 2)),
+            ("Tentacle length", "arms.tentacle_length", "float", (0.2, 2.0)),
+            ("Spread", "arms.spread", "float", (0.0, 1.2)),
+            ("Writhe", "arms.curl", "float", (0.0, 1.0)),
+        ]),
+        ("Spines", ("urchin",), [
+            ("Spines", "spines.count", "int", (0, 160)),
+            ("Length", "spines.length", "float", (0.05, 1.2)),
+            ("Sway", "spines.sway", "float", (0.0, 0.4)),
+        ]),
+    ]),
     ("Colours", [
-        ("Body", [
+        ("Body", None, [
             ("Hue", "colors.hue", "float", (0.0, 1.0)),
             ("Saturation", "colors.saturation", "float", (0.0, 1.0)),
-            ("Brightness", "colors.value", "float", (0.15, 1.0)),
+            ("Brightness", "colors.value", "float", (0.1, 1.0)),
             ("Pale belly", "colors.belly_lightness", "float", (0.0, 1.0)),
         ]),
-        ("Fins", [
+        ("Fins & spines", ("fish", "shark", "whale", "ray", "urchin"), [
             ("Fin colour", "colors.fin_color", "color", FIN),
             ("Hue shift (auto)", "colors.fin_hue_shift", "float", (-0.5, 0.5)),
         ]),
-        ("Pattern", [
-            ("Pattern", "colors.pattern", "choice", PATTERNS),
+        ("Pattern", None, [
+            ("Pattern", "colors.pattern", "choice", ALL_PATTERNS),
             ("Pattern colour", "colors.accent_color", "color", ACCENT),
             ("Hue shift (auto)", "colors.accent_hue_shift", "float", (-0.5, 0.5)),
             ("Density", "colors.pattern_scale", "float", (0.0, 1.0)),
             ("Offset", "colors.pattern_offset", "float", (0.0, 1.0)),
+            ("Fin tips", "colors.fin_tips", "float", (0.0, 0.6)),
         ]),
     ]),
 ]
@@ -161,7 +212,8 @@ class ScrollFrame(ttk.Frame):
 
 
 class FishStudio:
-    def __init__(self, root: tk.Tk, seed: int | None = None, species: str = RANDOM, out: Path = Path("out")):
+    def __init__(self, root: tk.Tk, seed: int | None = None, species: str = RANDOM, out: Path = Path("out"),
+                 kind: str = "fish"):
         self.root = root
         root.title("fishgen studio")
         root.geometry("1180x760")
@@ -184,7 +236,8 @@ class FishStudio:
         self._frame_i = 0
         self._name_is_auto = True
 
-        # Fish type
+        # Animal: kind first, then a species of that kind
+        self.kind = tk.StringVar(value=kind_label(kind if species == RANDOM else kind_of(species)))
         self.species = tk.StringVar(value=species)
         self.archetype = tk.StringVar(value=ANY)
         self.seed = tk.IntVar(value=seed if seed is not None else random.randrange(1_000_000))
@@ -214,6 +267,7 @@ class FishStudio:
 
         self._build()
 
+        self.kind.trace_add("write", lambda *_: self._kind_changed())
         for v in (self.species, self.archetype, self.seed):
             v.trace_add("write", lambda *_: self._type_changed())
         for v in (self.width, self.height, self.swim_frames, self.turn_frames, self.fps, self.pitch):
@@ -241,12 +295,14 @@ class FishStudio:
         paned.add(right, weight=1)
 
         self._build_type(left)
-        nb = ttk.Notebook(left)
+        nb = self.notebook = ttk.Notebook(left)
         nb.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        # (tab, [(section frame, kinds or None)]) so sections can follow the chosen kind.
+        self.gene_tabs: list[tuple[ttk.Frame, list[tuple[ttk.Frame, tuple | None]]]] = []
         for title, sections in GENE_TABS:
             sf = ScrollFrame(nb)
             nb.add(sf, text=title)
-            self._build_gene_tab(sf.inner, sections)
+            self.gene_tabs.append((sf, self._build_gene_tab(sf.inner, sections)))
         sf = ScrollFrame(nb)
         nb.add(sf, text="Sprite")
         self._build_sprite_tab(sf.inner)
@@ -257,30 +313,35 @@ class FishStudio:
         self._build_preview(right)
 
     def _build_type(self, parent):
-        box = ttk.LabelFrame(parent, text=" Fish type ", padding=10)
+        box = ttk.LabelFrame(parent, text=" Animal ", padding=10)
         box.pack(fill="x", padx=8, pady=8)
         box.columnconfigure(1, weight=1)
 
-        ttk.Label(box, text="Species").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=3)
-        ttk.Combobox(box, textvariable=self.species, values=SPECIES_NAMES, state="readonly", width=18) \
-            .grid(row=0, column=1, columnspan=2, sticky="ew", pady=3)
+        ttk.Label(box, text="Kind").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=3)
+        ttk.Combobox(box, textvariable=self.kind, values=[kind_label(k) for k in KINDS], state="readonly",
+                     width=18).grid(row=0, column=1, columnspan=2, sticky="ew", pady=3)
 
-        ttk.Label(box, text="Body type").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=3)
+        ttk.Label(box, text="Species").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=3)
+        self.species_box = ttk.Combobox(box, textvariable=self.species, values=species_for(self._kind()),
+                                        state="readonly", width=18)
+        self.species_box.grid(row=1, column=1, columnspan=2, sticky="ew", pady=3)
+
+        ttk.Label(box, text="Body type").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=3)
         self.arch_box = ttk.Combobox(box, textvariable=self.archetype, values=(ANY, *ARCHETYPES),
                                      state="readonly", width=18)
-        self.arch_box.grid(row=1, column=1, columnspan=2, sticky="ew", pady=3)
+        self.arch_box.grid(row=2, column=1, columnspan=2, sticky="ew", pady=3)
 
-        ttk.Label(box, text="Seed").grid(row=2, column=0, sticky="w", padx=(0, 8), pady=3)
+        ttk.Label(box, text="Seed").grid(row=3, column=0, sticky="w", padx=(0, 8), pady=3)
         ttk.Spinbox(box, textvariable=self.seed, from_=0, to=999_999_999, width=12) \
-            .grid(row=2, column=1, sticky="ew", pady=3)
-        ttk.Button(box, text="Random seed", command=self.random_seed).grid(row=2, column=2, sticky="ew", padx=(6, 0))
+            .grid(row=3, column=1, sticky="ew", pady=3)
+        ttk.Button(box, text="Random seed", command=self.random_seed).grid(row=3, column=2, sticky="ew", padx=(6, 0))
 
         btns = ttk.Frame(box)
-        btns.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(6, 0))
+        btns.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(6, 0))
         ttk.Button(btns, text="Surprise me", command=self.surprise).pack(side="left")
         ttk.Button(btns, text="Undo my tweaks", command=self.load_type).pack(side="left", padx=6)
-        ttk.Label(box, text="Same species + seed = same fish. Tweaks below go on top.",
-                  foreground="#666").grid(row=4, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        ttk.Label(box, text="Kind + species + seed = same animal. Tweaks below go on top.",
+                  foreground="#666").grid(row=5, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
     def _section(self, parent, row: int, title: str) -> int:
         ttk.Label(parent, text=title, style="Section.TLabel").grid(
@@ -312,37 +373,62 @@ class FishStudio:
         var.trace_add("write", show)
         show()
 
-    def _build_gene_tab(self, parent, sections):
-        parent.columnconfigure(1, weight=1)
-        row = 0
-        for title, controls in sections:
-            row = self._section(parent, row, title)
+    def _build_gene_tab(self, parent, sections) -> list[tuple[ttk.Frame, tuple | None]]:
+        """One frame per section, so sections that don't apply to a kind can be hidden."""
+        parent.columnconfigure(0, weight=1)
+        frames = []
+        for i, (title, kinds, controls) in enumerate(sections):
+            box = ttk.Frame(parent)
+            box.grid(row=i, column=0, sticky="ew", pady=(8, 0))
+            box.columnconfigure(0, minsize=130)
+            box.columnconfigure(1, weight=1)
+            frames.append((box, kinds))
+            row = self._section(box, 0, title)
             for label, path, kind, extra in controls:
                 if kind == "float":
                     var = tk.DoubleVar()
-                    self._slider(parent, row, label, var, *extra)
+                    self._slider(box, row, label, var, *extra)
+                elif kind == "int":
+                    var = tk.IntVar()
+                    self._slider(box, row, label, var, *extra, fmt="{:.0f}", step=1)
                 elif kind == "choice":
                     var = tk.StringVar()
-                    ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(8, 10), pady=2)
-                    ttk.Combobox(parent, textvariable=var, values=extra, state="readonly", width=12) \
+                    ttk.Label(box, text=label).grid(row=row, column=0, sticky="w", padx=(8, 10), pady=2)
+                    ttk.Combobox(box, textvariable=var, values=extra, state="readonly", width=12) \
                         .grid(row=row, column=1, sticky="w", pady=2)
                 elif kind == "bool":
                     var = tk.BooleanVar()
-                    ttk.Checkbutton(parent, text=label, variable=var) \
+                    ttk.Checkbutton(box, text=label, variable=var) \
                         .grid(row=row, column=0, columnspan=2, sticky="w", padx=(8, 0), pady=2)
                 else:  # color override
                     var = tk.StringVar()
-                    self._color_row(parent, row, label, path, var, extra)
+                    self._color_row(box, row, label, path, var, extra)
                 var.trace_add("write", lambda *_: self.gene_changed())
                 self.gene_vars[path] = var
                 row += 1
             if title == "Body":
-                ttk.Button(parent, text="Pick body colour...", command=self.pick_body_color) \
+                ttk.Button(box, text="Pick body colour...", command=self.pick_body_color) \
                     .grid(row=row, column=1, sticky="w", pady=(4, 0))
-                sw = tk.Label(parent, width=4, relief="solid", borderwidth=1)
+                sw = tk.Label(box, width=4, relief="solid", borderwidth=1)
                 sw.grid(row=row, column=2, sticky="e", pady=(4, 0))
                 self.swatches["body"] = (sw, BASE)
                 row += 1
+        return frames
+
+    def _show_kind_controls(self, kind: str):
+        """Show only the sections that apply to ``kind``; hide tabs left empty."""
+        for tab, frames in self.gene_tabs:
+            visible = 0
+            for box, kinds in frames:
+                if kinds is None or kind in kinds:
+                    box.grid()
+                    visible += 1
+                else:
+                    box.grid_remove()
+            if visible:
+                self.notebook.add(tab)  # re-adding a hidden tab shows it in its old place
+            else:
+                self.notebook.hide(tab)
 
     def _color_row(self, parent, row, label, path, var, slot):
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=(8, 10), pady=2)
@@ -451,14 +537,16 @@ class FishStudio:
     # ------------------------------------------------------------------ genome <-> controls
     def load_type(self):
         """Build the genome for the chosen species/body type/seed and show it in the controls."""
-        species = self.species.get()
-        self.arch_box.configure(state="readonly" if species == RANDOM else "disabled")
+        kind, species = self._kind(), self.species.get()
+        # Body types are a fish thing, and presets fix their own.
+        self.arch_box.configure(state="readonly" if kind == "fish" and species == RANDOM else "disabled")
         try:
             seed = int(self.seed.get())
         except (tk.TclError, ValueError):
             return
         arch = self.archetype.get()
-        self.base_genome = make_genome(species, seed, None if arch == ANY or species != RANDOM else arch)
+        self.base_genome = make_genome(species, seed, None if arch == ANY or species != RANDOM else arch, kind=kind)
+        self._show_kind_controls(kind)
         self._loading = True
         try:
             for path, var in self.gene_vars.items():
@@ -478,7 +566,7 @@ class FishStudio:
             if path.endswith(("_color",)):
                 value = value or None
             _set(g, path, value)
-        for fin in (g.dorsal, g.anal):
+        for fin in (g.dorsal, g.anal, g.dorsal2, g.wings):
             fin.end = max(fin.end, fin.start + 0.05)
         return g
 
@@ -518,11 +606,27 @@ class FishStudio:
         self.seed.set(random.randrange(1_000_000))
 
     def surprise(self):
-        self._batch = True  # one regeneration, not three
-        self.species.set(random.choice(SPECIES_NAMES))
+        self._batch = True  # one regeneration, not four
+        kind = random.choice(KINDS)
+        self.kind.set(kind_label(kind))
+        self.species.set(random.choice(species_for(kind)))
         self.archetype.set(ANY)
         self._batch = False
         self.random_seed()
+
+    def _kind(self) -> str:
+        return kind_from_label(self.kind.get())
+
+    def _kind_changed(self):
+        """New kind: offer its species and start from a random animal of that kind."""
+        kind = self._kind()
+        self.species_box.configure(values=species_for(kind))
+        if self.species.get() not in species_for(kind):
+            batch, self._batch = self._batch, True
+            self.species.set(RANDOM)
+            self._batch = batch
+        if not self._batch:
+            self.load_type()
 
     def _type_changed(self):
         if not self._batch:
@@ -531,7 +635,9 @@ class FishStudio:
     def _set_auto_name(self):
         self._setting_name = True
         try:
-            self.name.set(f"{self.species.get().lower().replace(' ', '_')}_{self.seed.get()}")
+            species = self.species.get()
+            stem = self._kind() if species == RANDOM else species.lower().replace(" ", "_").replace("-", "_")
+            self.name.set(f"{stem}_{self.seed.get()}")
         except tk.TclError:
             pass
         self._setting_name = False
@@ -715,7 +821,7 @@ class FishStudio:
             _open_folder(out)
 
 
-def run(seed: int | None = None, species: str = RANDOM, out: Path = Path("out")) -> int:
+def run(seed: int | None = None, species: str = RANDOM, out: Path = Path("out"), kind: str = "fish") -> int:
     if sys.platform.startswith("win"):
         try:  # crisp text on high-DPI screens
             import ctypes
@@ -723,6 +829,6 @@ def run(seed: int | None = None, species: str = RANDOM, out: Path = Path("out"))
         except Exception:
             pass
     root = tk.Tk()
-    FishStudio(root, seed=seed, species=species, out=out)
+    FishStudio(root, seed=seed, species=species, out=out, kind=kind)
     root.mainloop()
     return 0

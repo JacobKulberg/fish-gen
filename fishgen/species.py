@@ -1,19 +1,22 @@
-"""Named fish presets: a body archetype plus genome overrides on top of a seeded random fish.
+"""Named presets, each belonging to one animal kind (see kinds.py).
 
-The seed still varies everything a preset leaves alone, so "Goldfish, seed 3" and
-"Goldfish, seed 4" are recognisably goldfish but not identical.
+A preset asks its kind's generator for a random animal (fish of a given body type,
+or a shark / ray / ... of a given variant) and then pins the genes that make the
+species itself. The seed still varies everything a preset leaves alone, so
+"Goldfish, seed 3" and "Goldfish, seed 4" are recognisably goldfish but not identical.
 """
 
 from __future__ import annotations
 
-from .genome import ARCHETYPES, FishGenome
+from .genome import FishGenome
+from .kinds import individualise, random_genome
 
 RANDOM = "Random"
 
-# name -> (archetype, overrides). Overrides use genome field names; nested genes
-# ("colors", "dorsal", "anal", "pelvic") take a dict of their own fields.
-SPECIES: dict[str, tuple[str | None, dict]] = {
-    RANDOM: (None, {}),
+# Fish: name -> (archetype, overrides). Overrides use genome field names; nested genes
+# ("colors", "dorsal", "anal", "pelvic", "dorsal2", "wings", "arms", "spines")
+# take a dict of their own fields.
+FISH: dict[str, tuple[str, dict]] = {
     "Goldfish": ("round", dict(
         tail_shape="fan", tail_length=0.36, tail_spread=1.25, peduncle=0.28,
         dorsal=dict(present=True, shape="rounded", height=0.14), anal=dict(shape="rounded"),
@@ -95,20 +98,174 @@ SPECIES: dict[str, tuple[str | None, dict]] = {
     )),
 }
 
+
+def C(hue, saturation, value, belly=1.0, pattern="none", scale=0.5, offset=0.0, accent=None, fin=None,
+      fin_tips=0.0) -> dict:
+    """A complete colour override, so a preset's colours never depend on the seed."""
+    return dict(hue=hue, saturation=saturation, value=value, belly_lightness=belly, pattern=pattern,
+                pattern_scale=scale, pattern_offset=offset, accent_color=accent, fin_color=fin,
+                fin_tips=fin_tips, fin_hue_shift=0.0, accent_hue_shift=0.0)
+
+
+# Other kinds: name -> (kind, variant, overrides). The kind's generator (kinds.py) builds a
+# random animal of that kind and variant; the preset only pins what makes the species itself.
+OTHERS: dict[str, tuple[str, str, dict]] = {
+    # ------------------------------------------------------------------ sharks
+    "Tiger shark": ("shark", "requiem", dict(
+        nose=0.95, height=0.28, tail_length=0.34,
+        colors=C(0.1, 0.25, 0.58, pattern="tiger", scale=0.3, accent="#3b352c"),
+    )),
+    "Great white shark": ("shark", "requiem", dict(
+        height=0.33, nose=0.5, peduncle=0.11, tail_spread=1.8,
+        colors=C(0.58, 0.12, 0.55),
+    )),
+    "Hammerhead shark": ("shark", "hammerhead", dict(
+        hammer=0.13, height=0.25, eye_size=0.2,
+        colors=C(0.12, 0.15, 0.6),
+    )),
+    "Whale shark": ("shark", "requiem", dict(
+        height=0.3, thickness=0.95, nose=1.0, peak=0.33, eye_size=0.1, eye_height=0.1,
+        dorsal=dict(start=0.45, end=0.6, height=0.12),
+        colors=C(0.6, 0.35, 0.45, belly=0.85, pattern="spots", scale=0.9, offset=0.3, accent="#e6ebef"),
+    )),
+    "Mako shark": ("shark", "requiem", dict(
+        height=0.24, nose=0.38, peduncle=0.1, tail_spread=1.8, eye_size=0.2,
+        colors=C(0.62, 0.65, 0.6),
+    )),
+    "Blacktip reef shark": ("shark", "requiem", dict(
+        height=0.25, nose=0.6,
+        colors=C(0.1, 0.15, 0.72, fin_tips=0.3, accent="#16161a"),
+    )),
+    # ------------------------------------------------------------------ whales & dolphins
+    "Orca": ("whale", "whale", dict(
+        height=0.3, nose=0.8, eye_pos=0.1, eye_height=0.2, pectoral_size=0.16,
+        dorsal=dict(present=True, shape="triangle", start=0.38, end=0.5, height=0.3, sweep=0.15),
+        colors=C(0.62, 0.1, 0.13, pattern="orca", accent="#f2f2ee", fin="#1a1b20"),
+    )),
+    "Bottlenose dolphin": ("whale", "dolphin", dict(
+        beak=0.07, height=0.24, nose=0.6,
+        dorsal=dict(present=True, shape="triangle", start=0.42, end=0.56, height=0.13, sweep=0.9),
+        colors=C(0.58, 0.12, 0.62, belly=0.8),
+    )),
+    "Common dolphin": ("whale", "dolphin", dict(
+        beak=0.08, height=0.23, nose=0.55,
+        dorsal=dict(present=True, shape="triangle", start=0.42, end=0.56, height=0.13, sweep=0.9),
+        colors=C(0.62, 0.3, 0.35, pattern="lateral", scale=0.6, accent="#d8c58e", fin="#2b3240"),
+    )),
+    "Beluga": ("whale", "whale", dict(
+        height=0.3, nose=1.0, peak=0.42, dorsal=dict(present=False), tail_length=0.18, pectoral_size=0.14,
+        colors=C(0.55, 0.05, 0.93, belly=0.4),
+    )),
+    "Humpback whale": ("whale", "whale", dict(
+        height=0.27, nose=0.7, pectoral_size=0.36, eye_pos=0.16, eye_height=-0.1, tail_spread=1.6,
+        dorsal=dict(present=True, shape="rounded", start=0.6, end=0.66, height=0.04, sweep=0.5),
+        colors=C(0.62, 0.15, 0.25, belly=0.9, fin="#c9ccd2"),
+    )),
+    # ------------------------------------------------------------------ rays
+    "Cownose ray": ("ray", "eagle", dict(
+        nose=1.0, wings=dict(start=0.07, end=0.42, span=0.42, sweep=0.75, flap=0.85, wave=0.2),
+        dorsal=dict(present=True, shape="triangle", start=0.45, end=0.5, height=0.04, sweep=0.6),
+        colors=C(0.08, 0.5, 0.62),
+    )),
+    "Manta ray": ("ray", "eagle", dict(
+        nose=1.0, taper=2.0, peduncle=0.3,
+        wings=dict(start=0.04, end=0.4, span=0.62, sweep=0.65, flap=0.8, wave=0.15),
+        colors=C(0.6, 0.2, 0.2),
+    )),
+    "Spotted eagle ray": ("ray", "eagle", dict(
+        nose=0.5, wings=dict(start=0.09, end=0.42, span=0.45, sweep=0.75, flap=0.85, wave=0.2),
+        colors=C(0.62, 0.3, 0.26, pattern="spots", scale=0.5, offset=0.1, accent="#eef0f0"),
+    )),
+    "Stingray": ("ray", "stingray", dict(
+        nose=0.8, wings=dict(start=0.02, end=0.52, span=0.22, sweep=0.45, flap=0.3, wave=1.3),
+        colors=C(0.09, 0.3, 0.5),
+    )),
+    "Bluespotted stingray": ("ray", "stingray", dict(
+        nose=0.8, wings=dict(start=0.02, end=0.5, span=0.2, sweep=0.45, flap=0.3, wave=1.3),
+        colors=C(0.11, 0.5, 0.68, pattern="spots", scale=0.4, offset=0.6, accent="#2f8ae0"),
+    )),
+    # ------------------------------------------------------------------ squid & cuttlefish
+    "Squid": ("squid", "squid", dict(
+        height=0.22, arms=dict(length=0.45, tentacle_length=0.75),
+        colors=C(0.97, 0.35, 0.85, belly=0.5, pattern="spots", scale=1.0, accent="#b0384a"),
+    )),
+    "Giant squid": ("squid", "squid", dict(
+        height=0.18, wings=dict(end=0.2, span=0.08),
+        arms=dict(length=0.55, tentacle_length=1.0, thickness=0.028),
+        colors=C(0.0, 0.7, 0.6, belly=0.3),
+    )),
+    "Cuttlefish": ("squid", "cuttlefish", dict(
+        colors=C(0.08, 0.3, 0.62, belly=0.5, pattern="tiger", scale=0.2, accent="#4a3c30"),
+    )),
+    # ------------------------------------------------------------------ octopus
+    "Octopus": ("octopus", "octopus", dict(
+        height=0.7, arms=dict(length=1.3, thickness=0.05, spread=0.75, curl=0.6),
+        colors=C(0.03, 0.6, 0.6, belly=0.45, pattern="spots", scale=0.7, accent="#7a2a1c"),
+    )),
+    "Blue-ringed octopus": ("octopus", "octopus", dict(
+        height=0.65, arms=dict(length=1.1, thickness=0.045, spread=0.7, curl=0.55),
+        colors=C(0.12, 0.6, 0.82, belly=0.3, pattern="rings", scale=0.4, accent="#2e6bff"),
+    )),
+    "Dumbo octopus": ("octopus", "dumbo", dict(
+        colors=C(0.97, 0.35, 0.88, belly=0.4),
+    )),
+    # ------------------------------------------------------------------ urchins
+    "Purple sea urchin": ("urchin", "short", dict(
+        spines=dict(count=70, length=0.35, sway=0.12), colors=C(0.8, 0.55, 0.45, belly=0.0, fin="#8a4bb0"),
+    )),
+    "Long-spined urchin": ("urchin", "long", dict(
+        spines=dict(count=50, length=0.9, sway=0.12), colors=C(0.7, 0.2, 0.15, belly=0.0, fin="#25222e"),
+    )),
+    "Red pencil urchin": ("urchin", "short", dict(
+        spines=dict(count=24, length=0.45, sway=0.06), colors=C(0.02, 0.55, 0.45, belly=0.0, fin="#d0533a"),
+    )),
+    "Green sea urchin": ("urchin", "short", dict(
+        spines=dict(count=110, length=0.2, sway=0.12), colors=C(0.25, 0.5, 0.45, belly=0.0, fin="#8db04a"),
+    )),
+}
+
+# name -> (kind, archetype for fish / variant for other kinds, overrides)
+SPECIES: dict[str, tuple[str, str | None, dict]] = {
+    RANDOM: ("fish", None, {}),
+    **{name: ("fish", arch, ov) for name, (arch, ov) in FISH.items()},
+    **OTHERS,
+}
 SPECIES_NAMES = tuple(SPECIES)
 
 
-def make_genome(species: str, seed: int, archetype: str | None = None) -> FishGenome:
-    """A random fish for ``seed`` shaped into ``species``.
+def kind_of(species: str) -> str:
+    return SPECIES[species][0]
 
-    ``archetype`` only applies to the "Random" species (presets fix their own body type).
+
+def species_for(kind: str) -> tuple[str, ...]:
+    """Presets of one kind, after "Random" (a random animal of that kind)."""
+    return (RANDOM, *[n for n, (k, _, _) in SPECIES.items() if k == kind and n != RANDOM])
+
+
+def genome_for(seed: int, species: str | None = None, kind: str | None = None) -> FishGenome:
+    """The animal for command-line style options: a species, a kind, both, or neither (a random fish)."""
+    if species not in (None, RANDOM):
+        if kind is not None and kind != kind_of(species):
+            raise ValueError(f"{species} is a {kind_of(species)}, not a {kind}")
+        return make_genome(species, seed)
+    return random_genome(kind or "fish", seed)
+
+
+def make_genome(species: str, seed: int, archetype: str | None = None, kind: str = "fish") -> FishGenome:
+    """An animal for ``seed`` shaped into ``species``.
+
+    "Random" gives a random animal of ``kind``; ``archetype`` (fish body type) only
+    applies to a random fish. Presets fix their own kind and body type.
     """
     if species not in SPECIES:
         raise ValueError(f"unknown species {species!r}; choose from {', '.join(SPECIES)}")
-    preset_arch, overrides = SPECIES[species]
-    if archetype is not None and archetype not in ARCHETYPES:
-        raise ValueError(f"unknown archetype {archetype!r}")
-    g = FishGenome.random(seed, archetype=preset_arch or archetype)
+    preset_kind, preset_shape, overrides = SPECIES[species]
+    if species == RANDOM:
+        return random_genome(kind, seed, archetype=archetype)
+    if preset_kind == "fish":
+        g = random_genome("fish", seed, archetype=preset_shape)
+    else:
+        g = random_genome(preset_kind, seed, variant=preset_shape)
     for key, value in overrides.items():
         if isinstance(value, dict):
             sub = getattr(g, key)
@@ -116,4 +273,5 @@ def make_genome(species: str, seed: int, archetype: str | None = None) -> FishGe
                 setattr(sub, k, v)
         else:
             setattr(g, key, value)
+    individualise(g, species)
     return g

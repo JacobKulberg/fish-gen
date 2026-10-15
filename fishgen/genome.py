@@ -6,9 +6,21 @@ import random
 from dataclasses import asdict, dataclass, field
 
 TAIL_SHAPES = ("forked", "rounded", "truncate", "lunate", "pointed", "fan")
+# Tail shapes random fish never pick, used by the non-fish presets.
+# "flukes" lie flat (whales, dolphins); "heterocercal" is the shark tail.
+SPECIAL_TAILS = ("heterocercal", "flukes", "none")
+ALL_TAIL_SHAPES = TAIL_SHAPES + SPECIAL_TAILS
 FIN_SHAPES = ("triangle", "rounded", "sail", "long")
 PATTERNS = ("none", "stripes", "spots", "lateral", "saddle", "gradient")
+# Patterns random fish never pick.
+SPECIAL_PATTERNS = ("tiger", "orca", "rings")
+ALL_PATTERNS = PATTERNS + SPECIAL_PATTERNS
 ARCHETYPES = ("slender", "torpedo", "classic", "deep", "round")
+# What sort of animal a genome is. Decided first; every other gene is drawn to suit it (see kinds.py).
+KINDS = ("fish", "shark", "whale", "ray", "squid", "octopus", "urchin")
+PROFILES = ("fish", "sphere")  # body outline along its length
+EYE_STYLES = ("fish", "dark", "none")  # white eye with pupil / plain dark eye / no eyes
+WING_SHAPES = ("pointed", "round")
 
 
 @dataclass
@@ -19,6 +31,42 @@ class FinGenes:
     height: float  # relative to body length
     shape: str
     sweep: float  # how far the fin tip leans backwards (0..1)
+
+
+@dataclass
+class WingGenes:
+    """Flat sheets out of the flanks: ray wings, squid fins, dumbo-octopus ears."""
+
+    present: bool = False
+    start: float = 0.05  # root leading edge, along the body
+    end: float = 0.45  # root trailing edge
+    span: float = 0.4  # how far each wing reaches out from the flank (body length = 1)
+    sweep: float = 0.6  # how far back the tip sits (0 = level with the root's front, 1 = its back)
+    shape: str = "pointed"  # "pointed" (rays, eagle rays) or "round" (stingray disc)
+    flap: float = 0.6  # flap amplitude, as a fraction of the span
+    wave: float = 0.25  # flap waves along the chord (0 = flap in one piece, >1 = ripple)
+
+
+@dataclass
+class ArmGenes:
+    """Cephalopod arms trailing behind the head."""
+
+    count: int = 0
+    length: float = 0.8  # relative to body length
+    thickness: float = 0.08  # root radius, relative to body length
+    tentacles: int = 0  # extra feeding tentacles (squid have 2)
+    tentacle_length: float = 1.3
+    spread: float = 0.35  # how far the arms fan out
+    curl: float = 0.3  # how much the arm tips writhe
+
+
+@dataclass
+class SpineGenes:
+    """Urchin spines radiating from the body."""
+
+    count: int = 0
+    length: float = 0.35  # relative to body length
+    sway: float = 0.15  # radians of spine wobble
 
 
 @dataclass
@@ -35,6 +83,7 @@ class ColorGenes:
     # Optional exact colours ("#rrggbb") that replace the hue-derived fin / pattern colours.
     fin_color: str | None = None
     accent_color: str | None = None
+    fin_tips: float = 0.0  # 0 = off; else the outer fraction of each fin painted in the pattern colour
 
 
 @dataclass
@@ -65,6 +114,22 @@ class FishGenome:
     wave_count: float = 0.8  # body waves along the length
     # --- colour ---
     colors: ColorGenes = field(default=None)  # type: ignore[assignment]
+    # --- other animals (defaults leave an ordinary fish untouched) ---
+    kind: str = "fish"  # one of KINDS
+    profile: str = "fish"
+    beak: float = 0.0  # dolphin rostrum length (0 = none)
+    eye_style: str = "fish"
+    gill_slits: int = 1  # 1 = a single fish gill line, 5 = shark gill slits, 0 = none
+    dorsal2: FinGenes = field(default_factory=lambda: FinGenes(False, 0.75, 0.82, 0.05, "triangle", 0.5))
+    pectoral_flap: float = 1.0  # 1 = fluttering fish fins, 0 = stiff shark/dolphin fins
+    hammer: float = 0.0  # hammerhead: how far the head wing reaches each side
+    swim_vertical: bool = False  # whales and dolphins beat their tail up and down
+    wings: WingGenes = field(default_factory=WingGenes)
+    arms: ArmGenes = field(default_factory=ArmGenes)
+    spines: SpineGenes = field(default_factory=SpineGenes)
+    pulse: float = 0.0  # mantle squeeze per swim cycle (squid jet propulsion)
+    camera_tilt: float = 0.0  # extra camera tilt, e.g. to see a ray from above
+    turn_lag: float = 0.9  # how far the tail trails the head through a turn (0 = turn rigidly)
 
     @classmethod
     def random(cls, seed: int, archetype: str | None = None) -> "FishGenome":
@@ -150,8 +215,12 @@ class FishGenome:
 
     @classmethod
     def from_dict(cls, d: dict) -> "FishGenome":
+        """Inverse of to_dict. Genes missing from older dicts keep their defaults."""
         d = dict(d)
-        for name in ("dorsal", "anal", "pelvic"):
-            d[name] = FinGenes(**d[name])
-        d["colors"] = ColorGenes(**d["colors"])
+        for name in ("dorsal", "anal", "pelvic", "dorsal2"):
+            if name in d:
+                d[name] = FinGenes(**d[name])
+        for name, kind in (("colors", ColorGenes), ("wings", WingGenes), ("arms", ArmGenes), ("spines", SpineGenes)):
+            if name in d:
+                d[name] = kind(**d[name])
         return cls(**d)

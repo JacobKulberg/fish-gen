@@ -1,7 +1,8 @@
 # fishgen
 
 Procedural pixel-art fish generator. Every seed gives a different fish (body shape, fins,
-tail, palette and pattern) with four animations that hand off seamlessly into each other:
+tail, palette and pattern) with four animations that hand off seamlessly into each other.
+Besides fish it makes sharks, whales and dolphins, rays, squid and octopus, and sea urchins.
 
 ```
 swim_right ──▶ turn_right_to_left ──▶ swim_left ──▶ turn_left_to_right ──▶ swim_right
@@ -19,10 +20,31 @@ py gui.py          # Windows   (python3 gui.py elsewhere)
 
 That's it. The first run creates `.venv` and installs numpy + Pillow by itself.
 
-Pick a **species** (Goldfish, Clownfish, Angelfish, Tuna, Eel, Pufferfish, Betta, Neon tetra,
-Koi, Discus, Mackerel, Piranha, or Random with a chosen body type), then tweak anything on the
-tabs - body shape, eye, every fin, colours and pattern, sprite size and frame counts. The fish
-re-renders live on the right. The **Export** tab writes the same files as `fishgen generate`
+Pick a **kind** of animal first, then a **species** of that kind (or *Random* for a random
+animal of that kind), then tweak anything on the tabs - body shape, eye, fins, wings and arms,
+colours and pattern, sprite size and frame counts. Only the controls that apply to the chosen
+kind are shown. The animal re-renders live on the right.
+
+The kind is always decided first and every gene is then drawn to suit it, so a random shark
+is always a shark (shark tail, gill slits, two dorsal fins, stiff side fins) and only its
+proportions, snout, colours and markings vary; a random ray is always a flat winged ray, and so on.
+Presets work the same way: the species fixes what makes it that species (a Tiger shark's
+stripes, an Orca's markings) and each seed is a different individual of it, with its own
+build, fin, wing or arm sizes, shading and the odd scar.
+
+| kind | species |
+|---|---|
+| Fish | Random (with a chosen body type), Goldfish, Clownfish, Angelfish, Tuna, Eel, Pufferfish, Betta, Neon tetra, Koi, Discus, Mackerel, Piranha |
+| Shark | Tiger shark, Great white shark, Hammerhead shark, Whale shark, Mako shark, Blacktip reef shark |
+| Whale & dolphin | Orca, Bottlenose dolphin, Common dolphin, Beluga, Humpback whale |
+| Ray | Cownose ray, Manta ray, Spotted eagle ray, Stingray, Bluespotted stingray |
+| Squid & cuttlefish | Squid, Giant squid, Cuttlefish |
+| Octopus | Octopus, Blue-ringed octopus, Dumbo octopus |
+| Sea urchin | Purple sea urchin, Long-spined urchin, Red pencil urchin, Green sea urchin |
+
+Each animal moves its own way: whales and dolphins beat their flukes up and down, rays flap
+(or ripple) their wings and are seen a little from above, squid and octopus jet mantle-first
+with their arms trailing and flaring, and urchins sit still while their spines sway. The **Export** tab writes the same files as `fishgen generate`
 (named after the species and seed, e.g. `out/koi_5/koi_5.png`).
 
 ## Install (command line)
@@ -39,6 +61,8 @@ pip install -e ".[preview,dev]"
 fishgen                                         # opens the designer window
 fishgen generate --seed 42                      # all formats into ./out/fish_42/
 fishgen generate --species Clownfish --count 5  # five different clownfish
+fishgen generate --species "Tiger shark" --size 48
+fishgen generate --kind ray --count 4           # four random rays: ./out/ray_<seed>/
 fishgen generate --count 20 --size 48 --out fish    # 20 fish, 48x48 sprites
 fishgen generate --seed 7 --size 64x32 --formats sheet,godot
 fishgen generate --seed 7 --formats gif --scale 8 --bg "#1d3557"
@@ -52,7 +76,8 @@ fishgen preview --fish 5                        # live aquarium window
 | option | default | |
 |---|---|---|
 | `--seed N` | random | same seed = same fish |
-| `--species NAME` | random | preset fish type (also works with `preview` and `gui`) |
+| `--kind KIND` | fish | `fish`, `shark`, `whale`, `ray`, `squid`, `octopus` or `urchin`: a random animal of that kind |
+| `--species NAME` | random | preset (implies its kind; also works with `preview` and `gui`) |
 | `--size N` or `WxH` | `32` | sprite size in pixels |
 | `--swim-frames` | `8` | frames per swim cycle |
 | `--turn-frames` | `10` | frames per turn-around |
@@ -116,12 +141,19 @@ func _on_finished():  # turns don't loop
 
 ## How it works
 
-1. **Genome** (`genome.py`) - a seeded RNG picks an archetype (slender, torpedo, classic,
-   deep, round) and then every proportion, fin, tail shape, colour and pattern.
-   Species presets (`species.py`) fix the archetype and override some genes; the seed varies the rest.
+1. **Genome** (`genome.py`, `kinds.py`) - the animal's kind comes first. For a fish, a seeded
+   RNG picks an archetype (slender, torpedo, classic, deep, round) and then every proportion,
+   fin, tail shape, colour and pattern. Every other kind has its own generator that sets all of
+   its genes within that kind's ranges (some kinds have variants, e.g. requiem shark or
+   hammerhead, eagle ray or stingray). Species presets (`species.py`) belong to one kind, ask
+   its generator for a body and override the genes that make the species; the seed varies the rest.
 2. **Model** (`geometry.py`) - the body is a 3D tube lofted along a spine; fins are flat
    meshes attached to it. A pose bends the spine (travelling swim wave + tail flex + a
    C-curve while turning) and rotates it around the vertical axis.
+   Other animals reuse the same spine: flukes lie flat and whales bend it vertically, rays and
+   squid add flapping wing sheets, cephalopod arms are tapering tubes hung off the end of the
+   body, a hammerhead's head is a flat sheet with the eyes on its tips, and urchin spines are
+   line segments drawn depth-tested after the mesh.
 3. **Rasterizer** (`raster.py`) - z-buffered triangles sampled once at each pixel centre,
    so the result is crisp pixel art rather than a blurry downscale.
 4. **Shading** (`render.py`) - lighting is quantised to a limited, hue-shifted palette

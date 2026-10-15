@@ -71,15 +71,15 @@ SHOWCASE_ORDER = ("swim_right", "turn_right_to_left", "swim_left", "turn_left_to
 
 
 def build_animations(swim_frames: int = 8, turn_frames: int = 10, fps: float = 10.0,
-                     pitch: float = 0.25) -> dict[str, Animation]:
+                     pitch: float = 0.25, lag: float = 0.9) -> dict[str, Animation]:
     right, left = 0.0, math.pi
     return {
         "swim_right": Animation("swim_right", swim_poses(swim_frames, right, pitch), fps, True, "swim_right"),
         "turn_right_to_left": Animation(
-            "turn_right_to_left", turn_poses(turn_frames, swim_frames, right, left, pitch), fps, False, "swim_left"),
+            "turn_right_to_left", turn_poses(turn_frames, swim_frames, right, left, pitch, lag), fps, False, "swim_left"),
         "swim_left": Animation("swim_left", swim_poses(swim_frames, left, pitch), fps, True, "swim_left"),
         "turn_left_to_right": Animation(
-            "turn_left_to_right", turn_poses(turn_frames, swim_frames, left, right, pitch), fps, False, "swim_right"),
+            "turn_left_to_right", turn_poses(turn_frames, swim_frames, left, right, pitch, lag), fps, False, "swim_right"),
     }
 
 
@@ -108,7 +108,8 @@ class FishSprite:
 def generate(seed: int, width: int = 32, height: int = 32, swim_frames: int = 8, turn_frames: int = 10,
              fps: float = 10.0, pitch: float = 0.25, genome: FishGenome | None = None) -> FishSprite:
     genome = genome or FishGenome.random(seed)
-    anims = build_animations(swim_frames, turn_frames, fps, pitch)
+    # Some animals ask for a steeper camera (rays are seen from above) or a stiffer turn.
+    anims = build_animations(swim_frames, turn_frames, fps, pitch + genome.camera_tilt, genome.turn_lag)
     all_poses = [p for a in anims.values() for p in a.poses]
     renderer = FishRenderer(genome, width, height, fit_poses=all_poses)
     for anim in anims.values():
