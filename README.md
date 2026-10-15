@@ -1,8 +1,36 @@
-# fishgen
+<div align="center">
 
-Procedural pixel-art fish generator. Every seed gives a different fish (body shape, fins,
-tail, palette and pattern) with four animations that hand off seamlessly into each other.
-Besides fish it makes sharks, whales and dolphins, rays, squid and octopus, and sea urchins.
+# 🐟 fishgen
+
+**Procedural pixel-art sea creatures, with game-ready swim and turn-around animations.**
+
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Godot 4](https://img.shields.io/badge/exports-Godot%204-478CBF?logo=godotengine&logoColor=white)](#playing-it-in-a-game)
+![38 species](https://img.shields.io/badge/species-38-orange)
+
+<img src="docs/images/hero.gif" alt="Twelve generated animals swimming and turning around" width="636">
+
+</div>
+
+Every seed gives a different fish (body shape, fins, tail, palette and pattern) with four
+animations that hand off seamlessly into each other. Besides fish it makes sharks, whales
+and dolphins, rays, squid and octopus, and sea urchins. Output is crisp pixel art at any
+sprite size, exported as GIFs, a sprite sheet + JSON, loose PNG frames, or a Godot 4
+`SpriteFrames` resource.
+
+- 🎲 **Infinite variety** - same seed, same fish; a new seed, a new fish
+- 🦈 **7 kinds, 38 species presets** - from clownfish to hammerheads, mantas and octopus
+- 🔄 **Seamless 3/4 turn-arounds** - the fish shows its face mid-turn, no sprite flipping
+- 🖌️ **Designer GUI** - tweak every gene and watch it re-render live
+- 🎮 **Game-ready exports** - sprite sheets with metadata and drop-in Godot 4 resources
+
+<table>
+<tr>
+<td align="center"><img src="docs/images/showcase.gif" alt="A koi swimming and turning around" width="360"><br><sub>one koi, full cycle</sub></td>
+<td align="center"><img src="docs/images/turn.gif" alt="A great white shark turning around" width="360"><br><sub>a great white turning around</sub></td>
+</tr>
+</table>
 
 ```
 swim_right ──▶ turn_right_to_left ──▶ swim_left ──▶ turn_left_to_right ──▶ swim_right
@@ -12,9 +40,21 @@ swim_right ──▶ turn_right_to_left ──▶ swim_left ──▶ turn_left_
 The turn is a 3/4 rotation: the fish swings its head towards the viewer, shows its face,
 and comes out facing the other way, with its body curving behind its head.
 
+## Gallery
+
+**24 random fish** (`fishgen generate --count 24`): no two alike.
+
+<img src="docs/images/random_fish.gif" alt="A grid of 24 randomly generated fish swimming" width="100%">
+
+**Every species preset**, seed 1 (row by row: fish, sharks, whales & dolphins, rays, squid & cuttlefish, octopus, urchins):
+
+<img src="docs/images/species.png" alt="All 38 species presets" width="100%">
+
 ## Quick start: the designer window
 
 ```sh
+git clone https://github.com/JacobKulberg/fish-gen.git
+cd fish-gen
 py gui.py          # Windows   (python3 gui.py elsewhere)
 ```
 
@@ -98,6 +138,8 @@ fishgen preview --fish 5                        # live aquarium window
 
 ## Output
 
+<img src="docs/images/sheet.png" alt="A clownfish sprite sheet: one row per animation" width="100%">
+
 ```
 out/fish_42/
   fish_42.png          sprite sheet: one row per animation
@@ -167,3 +209,7 @@ func _on_finished():  # turns don't loop
 ```sh
 pytest
 ```
+
+## License
+
+[MIT](LICENSE). Generated sprites are yours to use however you like, including in commercial games.
