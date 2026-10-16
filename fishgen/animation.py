@@ -15,12 +15,15 @@ links to (see ``Animation.next``).
 from __future__ import annotations
 
 import math
+import os
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
 import numpy as np
 
 from .genome import FishGenome
-from .geometry import Pose, turn_heading
+from .geometry import FishModel, Pose, turn_heading
+from .pixel import pixelate
 from .render import FishRenderer
 
 
@@ -31,7 +34,6 @@ class Animation:
     fps: float
     loop: bool
     next: str | None  # animation that should play after this one
-    indexed: list[np.ndarray] = field(default_factory=list)  # palette-slot frames (h, w) uint8
     frames: list[np.ndarray] = field(default_factory=list)  # RGBA frames (h, w, 4) uint8
 
     @property
@@ -104,11 +106,19 @@ def build_animations(swim_frames: int = 8, turn_frames: int = 10, fps: float = 1
     return anims
 
 
-def canvas_size(genome: FishGenome, width: int, height: int) -> tuple[int, int]:
-    """Sprite canvas for ``genome``: ``width`` x ``height`` is the canvas of an animal of size 1,
-    so bigger animals (sharks, whales) get bigger sprites and small fish smaller ones."""
-    k = genome.size
-    return (max(12, min(512, round(width * k))), max(12, min(512, round(height * k))))
+DEFAULT_PX_PER_M = 16.0  # a 1 m animal is 16 px long, a 4.7 m great white 75 px
+MIN_PX = 16  # the smallest animals are drawn at least this long, so there is something to see
+MAX_PX = 128  # and the biggest (whales) get a sprite no bigger than this
+STYLES = ("pixel", "smooth")
+
+
+def px_per_unit(genome: FishGenome, px_per_m: float = DEFAULT_PX_PER_M, min_px: int = MIN_PX,
+                max_px: int = MAX_PX) -> float:
+    """Pixels per body length that draw ``genome`` at its real size: ``px_per_m`` pixels to a
+    metre of ``genome.length_cm``, clamped so it measures ``min_px``..``max_px`` pixels."""
+    extent = FishModel(genome, detail=24).real_extent()
+    want = px_per_m * genome.length_cm / 100.0
+    return float(np.clip(want, min_px, max_px)) / max(extent, 1e-6)
 
 
 @dataclass
@@ -118,36 +128,66 @@ class FishSprite:
     genome: FishGenome
     renderer: FishRenderer
     animations: dict[str, Animation]
+    style: str = "pixel"
+    palette: np.ndarray | None = None  # (n, 3) uint8: every colour the pixel-art frames use
 
     @property
     def size(self) -> tuple[int, int]:
         return self.renderer.width, self.renderer.height
 
-    def showcase(self, swim_loops: int = 2, indexed: bool = False) -> list[np.ndarray]:
+    def showcase(self, swim_loops: int = 2) -> list[np.ndarray]:
         """A seamless loop demonstrating everything: swim, turn, swim back, turn."""
         a = self.animations
         seq: list[np.ndarray] = []
         for name in [n for n in SHOWCASE_ORDER if n in a]:
             loops = swim_loops if a[name].loop else 1
-            seq += (a[name].indexed if indexed else a[name].frames) * loops
+            seq += a[name].frames * loops
         return seq
 
 
 def generate(seed: int, width: int = 32, height: int = 32, swim_frames: int = 8, turn_frames: int = 10,
              fps: float = 10.0, pitch: float = 0.25, genome: FishGenome | None = None,
-             scale_by_size: bool = True) -> FishSprite:
-    """Render every animation of a fish. ``width`` x ``height`` is the sprite size; with
-    ``scale_by_size`` that is the size for an animal of ``genome.size`` 1 and the canvas
-    grows or shrinks with the animal (see ``canvas_size``)."""
+             scale_by_size: bool = True, px_per_m: float = DEFAULT_PX_PER_M, min_px: int = MIN_PX,
+             max_px: int = MAX_PX, style: str = "pixel", colors: int | None = None, outline: bool = True,
+             threads: int | None = None) -> FishSprite:
+    """Render every animation of an animal.
+
+    With ``scale_by_size`` (the default) the animal is drawn at its real size, ``px_per_m``
+    pixels to the metre, on a canvas just big enough for every frame, so animals put side by
+    side are to scale. Small animals are still drawn ``min_px`` long, and the biggest are
+    shrunk to fit a ``max_px`` canvas. Otherwise it is fitted into a ``width`` x ``height`` canvas.
+
+    ``style`` "pixel" (the default) turns the renders into pixel art: hard edges, one palette
+    of ``colors`` colours (None = chosen for the size) shared by every frame, and an outline.
+    "smooth" keeps the anti-aliased full-colour renders.
+    """
+    if style not in STYLES:
+        raise ValueError(f"style must be one of {STYLES}, got {style!r}")
     genome = genome or FishGenome.random(seed)
-    if scale_by_size:
-        width, height = canvas_size(genome, width, height)
-    # Some animals ask for a steeper camera (rays are seen from above) or a stiffer turn.
+    # Some animals ask for a steeper camera or a stiffer turn.
     anims = build_animations(swim_frames, turn_frames, fps, pitch + genome.camera_tilt, genome.turn_lag,
                              puff=genome.puff > 0)
     all_poses = [p for a in anims.values() for p in a.poses]
-    renderer = FishRenderer(genome, width, height, fit_poses=all_poses)
+    # Pixel art keeps a clear ring round the animal for its outline.
+    margin = 2.0 if style == "pixel" and outline else 1.0
+    if scale_by_size:
+        renderer = FishRenderer(genome, fit_poses=all_poses, margin=margin, max_size=max_px,
+                                px_per_unit=px_per_unit(genome, px_per_m, min_px, max_px))
+    else:
+        renderer = FishRenderer(genome, width, height, fit_poses=all_poses, margin=margin)
+    # Frames are independent, and the heavy lifting (C code and numpy) runs outside the GIL.
+    workers = threads or min(8, os.cpu_count() or 1)
+    if workers > 1 and len(all_poses) > 1:
+        with ThreadPoolExecutor(workers) as ex:
+            done = list(ex.map(renderer.render_with_eyes, all_poses))
+    else:
+        done = [renderer.render_with_eyes(p) for p in all_poses]
+    frames = [f for f, _ in done]
+    palette = None
+    if style == "pixel":
+        frames, palette = pixelate(frames, colors, outline, eyes=[e for _, e in done])
+    i = 0
     for anim in anims.values():
-        anim.indexed = [renderer.render_indexed(p) for p in anim.poses]
-        anim.frames = [renderer.to_rgba(f) for f in anim.indexed]
-    return FishSprite(genome, renderer, anims)
+        anim.frames = frames[i:i + len(anim.poses)]
+        i += len(anim.poses)
+    return FishSprite(genome, renderer, anims, style, palette)

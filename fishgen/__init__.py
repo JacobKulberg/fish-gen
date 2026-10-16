@@ -1,4 +1,4 @@
-"""fishgen - procedural pixel-art fish with seamless swim and turn-around animations."""
+"""fishgen - procedural pixel-art sea creatures, rendered from realistic 3D models, with seamless swim and turn-around animations."""
 
 __version__ = "0.1.0"
 

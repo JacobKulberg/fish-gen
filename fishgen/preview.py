@@ -1,6 +1,7 @@
 """Live aquarium preview (pygame-ce).
 
-Fish swim back and forth and play their turn-around when they reach a wall.
+Fish swim back and forth and play their turn-around when they reach a wall. Animals
+are drawn to scale with each other by default, so a shark dwarfs the reef fish around it.
 Turns are only triggered at the end of a swim cycle, which is exactly the
 hand-off point the animations are designed for - the same rule a game should use.
 """
@@ -22,10 +23,13 @@ WATER_TOP = (34, 86, 128)
 WATER_BOTTOM = (10, 28, 52)
 
 
-def _surface(frame, zoom: int) -> pygame.Surface:
+def _surface(frame, zoom: float) -> pygame.Surface:
     h, w = frame.shape[:2]
     surf = pygame.image.frombuffer(frame.tobytes(), (w, h), "RGBA").convert_alpha()
-    return pygame.transform.scale_by(surf, zoom) if zoom != 1 else surf
+    if zoom == 1:
+        return surf
+    size = (max(1, round(w * zoom)), max(1, round(h * zoom)))
+    return pygame.transform.smoothscale(surf, size) if zoom < 1 else pygame.transform.scale(surf, size)
 
 
 class TankFish:
@@ -37,13 +41,14 @@ class TankFish:
         self.x = rng.uniform(bounds.left + w, max(bounds.left + w + 1, bounds.right - w))
         self.base_y = rng.uniform(bounds.top + h, max(bounds.top + h + 1, bounds.bottom - h))
         self.bob = rng.uniform(0, math.tau)
-        self.speed = rng.uniform(18, 34)  # sprite pixels per second
+        # Cruising speed: about half to one body length a second, whatever the animal's size.
+        self.speed = rng.uniform(0.5, 1.0) * sprite.size[0] * 0.6  # sprite pixels per second
         self.anim = rng.choice(["swim_right", "swim_left"])
         self.frame = rng.randrange(len(self.sprite.animations[self.anim].frames))
         self.clock = 0.0
         self.turn_queued = False
 
-    def set_zoom(self, zoom: int):
+    def set_zoom(self, zoom: float):
         self.zoom = zoom
         self.surfaces = {n: [_surface(f, zoom) for f in a.frames] for n, a in self.sprite.animations.items()}
 
@@ -93,20 +98,17 @@ class TankFish:
 
 
 class Preview:
-    def __init__(self, seed: int, size, count: int, zoom: int, swim_frames: int, turn_frames: int,
-                 fps: float, pitch: float, out: Path, species: str | None = None, kind: str | None = None,
-                 scale_by_size: bool = True):
+    def __init__(self, seed: int, count: int, zoom: float, out: Path, species: str | None = None,
+                 kind: str | None = None, opts: dict | None = None):
         pygame.init()
         pygame.display.set_caption("fishgen preview")
         self.screen = pygame.display.set_mode((1100, 650), pygame.RESIZABLE)
         self.font = pygame.font.SysFont("consolas,menlo,monospace", 15)
         self.rng = random.Random(seed)
         self.seed = seed
-        self.size = size
         self.count = count
         self.zoom = zoom
-        self.opts = dict(swim_frames=swim_frames, turn_frames=turn_frames, fps=fps, pitch=pitch,
-                         scale_by_size=scale_by_size)
+        self.opts = opts or {}
         self.out = out
         self.species = species
         self.kind = kind
@@ -127,7 +129,7 @@ class Preview:
         for i in range(self.count):
             seed = self.seed + i
             genome = genome_for(seed, self.species, self.kind)
-            sprite = generate(seed, *self.size, genome=genome, **self.opts)
+            sprite = generate(seed, genome=genome, **self.opts)
             self.fish.append(TankFish(sprite, self.zoom, self.bounds(), self.rng))
         seeds = f"{self.seed}" if self.count == 1 else f"{self.seed}..{self.seed + self.count - 1}"
         pygame.display.set_caption(f"fishgen preview - seed {seeds}")
@@ -160,9 +162,10 @@ class Preview:
         elif key == pygame.K_p:
             self.paused = not self.paused
         elif key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
-            self.set_zoom(self.zoom + 1)
+            # Whole-number zoom keeps pixel art crisp: every pixel the same size.
+            self.set_zoom(math.floor(self.zoom) + 1 if self.zoom >= 1 else min(1.0, self.zoom * 1.5))
         elif key in (pygame.K_MINUS, pygame.K_KP_MINUS):
-            self.set_zoom(max(1, self.zoom - 1))
+            self.set_zoom(math.ceil(self.zoom) - 1 if self.zoom > 1 else max(0.1, self.zoom / 1.5))
         elif key == pygame.K_e:
             for f in self.fish:
                 d = self.out / f"{f.sprite.genome.kind}_{f.sprite.genome.seed}"
@@ -170,7 +173,7 @@ class Preview:
             self.say(f"exported {len(self.fish)} fish to {self.out.resolve()}")
         return True
 
-    def set_zoom(self, zoom: int):
+    def set_zoom(self, zoom: float):
         self.zoom = zoom
         for f in self.fish:
             f.set_zoom(zoom)
@@ -195,7 +198,7 @@ class Preview:
         cols = max(len(a.frames) for a in f.sprite.animations.values()) + 1
         rows = len(f.sprite.animations)
         fit = min((sw - 60) // cols - 4, (sh - 140) // rows - 32)
-        z = max(1, min(self.zoom, fit // max(w, h)))
+        z = min(self.zoom, max(fit, 8) / max(w, h))
         t = pygame.time.get_ticks() / 1000
         panel = pygame.Surface(self.screen.get_size(), pygame.SRCALPHA)
         panel.fill((0, 0, 0, 170))
@@ -208,21 +211,21 @@ class Preview:
             y += 20
             for i, frame in enumerate(anim.frames):
                 surf = _surface(frame, z)
-                x = 20 + i * (w * z + 4)
-                pygame.draw.rect(self.screen, (40, 60, 80), (x, y, w * z, h * z))
+                x = 20 + i * (round(w * z) + 4)
+                pygame.draw.rect(self.screen, (40, 60, 80), (x, y, round(w * z), round(h * z)))
                 self.screen.blit(surf, (x, y))
             # Live loop of this animation at the end of the row.
             idx = int(t * anim.fps) % len(anim.frames)
-            x = 20 + len(anim.frames) * (w * z + 4) + 16
-            pygame.draw.rect(self.screen, (70, 90, 60), (x, y, w * z, h * z))
+            x = 20 + len(anim.frames) * (round(w * z) + 4) + 16
+            pygame.draw.rect(self.screen, (70, 90, 60), (x, y, round(w * z), round(h * z)))
             self.screen.blit(_surface(anim.frames[idx], z), (x, y))
-            y += h * z + 12
+            y += round(h * z) + 12
 
     def draw_hud(self, fps: float):
         seeds = ", ".join(str(f.sprite.genome.seed) for f in self.fish[:6])
         if len(self.fish) > 6:
             seeds += ", ..."
-        top = self.font.render(f"seed {seeds}   size {self.size[0]}x{self.size[1]}   zoom {self.zoom}x   {fps:4.0f} fps",
+        top = self.font.render(f"seed {seeds}   zoom {self.zoom:.2g}x   {fps:4.0f} fps",
                                True, (220, 235, 245))
         self.screen.blit(top, (12, 10))
         h = self.screen.get_height()
@@ -263,7 +266,6 @@ class Preview:
         pygame.quit()
 
 
-def run(seed: int, size=(32, 32), count: int = 1, zoom: int = 4, swim_frames: int = 8, turn_frames: int = 10,
-        fps: float = 10.0, pitch: float = 0.25, out: Path = Path("out"), species: str | None = None,
-        kind: str | None = None, scale_by_size: bool = True):
-    Preview(seed, size, count, zoom, swim_frames, turn_frames, fps, pitch, out, species, kind, scale_by_size).run()
+def run(seed: int, count: int = 1, zoom: float = 1.0, out: Path = Path("out"), species: str | None = None,
+        kind: str | None = None, opts: dict | None = None):
+    Preview(seed, count, zoom, out, species, kind, opts).run()

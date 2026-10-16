@@ -8,10 +8,10 @@ import sys
 import time
 from pathlib import Path
 
-from .animation import generate
+from .animation import DEFAULT_PX_PER_M, MAX_PX, MIN_PX, STYLES, generate
 from .export import FORMATS, export_all
 from .genome import KINDS
-from .species import RANDOM, SPECIES_NAMES, genome_for, kind_of
+from .species import RANDOM, SPECIES_NAMES, genome_for, kind_of, make_genome, morphs_of
 
 
 def parse_size(text: str) -> tuple[int, int]:
@@ -24,8 +24,8 @@ def parse_size(text: str) -> tuple[int, int]:
             size = int(text), int(text)
     except ValueError:
         raise argparse.ArgumentTypeError(f"size must look like 32 or 48x32, got {text!r}")
-    if min(size) < 8 or max(size) > 512:
-        raise argparse.ArgumentTypeError("size must be between 8 and 512 pixels")
+    if min(size) < 8 or max(size) > 2048:
+        raise argparse.ArgumentTypeError("size must be between 8 and 2048 pixels")
     return size
 
 
@@ -45,14 +45,50 @@ def _add_render_args(p: argparse.ArgumentParser):
                    help="kind of animal; a random one of this kind unless --species picks a preset")
     p.add_argument("--species", default=None, choices=SPECIES_NAMES, metavar="NAME",
                    help=f"preset (implies its kind): {', '.join(SPECIES_NAMES)}")
-    p.add_argument("--size", type=parse_size, default=(32, 32), metavar="N|WxH",
-                   help="sprite size for a medium-sized animal (default 32); bigger animals get bigger sprites")
-    p.add_argument("--fixed-size", action="store_true",
-                   help="use exactly --size for every animal instead of scaling it by the animal's size")
+    p.add_argument("--morph", default=None, metavar="NAME",
+                   help="colour variety of the species, e.g. --species Koi --morph Showa (default: from the seed)")
+    p.add_argument("--size", type=parse_size, default=None, metavar="N|WxH",
+                   help="fixed sprite canvas, e.g. 16, 32, 64, 96, 128 or 48x32; every animal is fitted into it "
+                        "(default: draw animals to scale with each other, see --px-per-m)")
+    p.add_argument("--px-per-m", type=float, default=DEFAULT_PX_PER_M, metavar="PX",
+                   help=f"to scale: pixels per metre of animal (default {DEFAULT_PX_PER_M:g})")
+    p.add_argument("--min-px", type=int, default=MIN_PX,
+                   help=f"to scale: the smallest animals are drawn this long (default {MIN_PX})")
+    p.add_argument("--max-px", type=int, default=MAX_PX,
+                   help=f"to scale: the biggest animals are shrunk to fit a sprite this big (default {MAX_PX})")
+    p.add_argument("--style", default="pixel", choices=STYLES,
+                   help="pixel: pixel art with a limited palette and an outline (default); "
+                        "smooth: anti-aliased full-colour renders")
+    p.add_argument("--colors", type=int, default=None, metavar="N",
+                   help="pixel art: palette size (default: 10 at 16px up to 24 at 128px)")
+    p.add_argument("--no-outline", dest="outline", action="store_false", help="pixel art: no dark outline")
     p.add_argument("--swim-frames", type=int, default=8, help="frames per swim cycle (default 8)")
     p.add_argument("--turn-frames", type=int, default=10, help="frames per turn-around (default 10)")
     p.add_argument("--fps", type=float, default=10.0, help="playback speed (default 10)")
     p.add_argument("--pitch", type=float, default=0.25, help="camera tilt in radians (default 0.25)")
+
+
+def _genome(args, seed: int):
+    if args.morph:
+        if args.species in (None, RANDOM):
+            raise SystemExit("--morph needs --species")
+        if args.morph not in morphs_of(args.species):
+            known = ", ".join(morphs_of(args.species)) or "no varieties"
+            raise SystemExit(f"{args.species} has {known}, not {args.morph!r}")
+        return make_genome(args.species, seed, morph=args.morph)
+    return genome_for(seed, args.species, args.kind)
+
+
+def render_opts(args) -> dict:
+    fixed = args.size
+    if args.colors is not None and not 2 <= args.colors <= 256:
+        raise SystemExit("--colors must be between 2 and 256")
+    opts = dict(swim_frames=args.swim_frames, turn_frames=args.turn_frames, fps=args.fps, pitch=args.pitch,
+                scale_by_size=fixed is None, px_per_m=args.px_per_m, min_px=args.min_px, max_px=args.max_px,
+                style=args.style, colors=args.colors, outline=args.outline)
+    if fixed:
+        opts["width"], opts["height"] = fixed
+    return opts
 
 
 def cmd_generate(args) -> int:
@@ -61,13 +97,14 @@ def cmd_generate(args) -> int:
     out_root = Path(args.out)
     for seed in seeds:
         t0 = time.perf_counter()
-        genome = genome_for(seed, args.species, args.kind)
-        sprite = generate(seed, *args.size, swim_frames=args.swim_frames, turn_frames=args.turn_frames,
-                          fps=args.fps, pitch=args.pitch, genome=genome, scale_by_size=not args.fixed_size)
+        genome = _genome(args, seed)
+        sprite = generate(seed, genome=genome, **render_opts(args))
         out_dir = out_root / f"{genome.kind}_{seed}" if args.count > 1 or not args.flat else out_root
         files = export_all(sprite, out_dir, args.formats, gif_scale=args.scale, frame_scale=args.frame_scale,
                            background=args.bg, padding=args.padding, godot_dir=args.godot_dir)
-        print(f"{genome.kind} {seed}: {len(files)} files -> {out_dir}  ({time.perf_counter() - t0:.2f}s)")
+        w, h = sprite.size
+        what = f"{genome.morph + ' ' if genome.morph else ''}{genome.kind}, {genome.length_cm:.0f} cm, {w}x{h}px"
+        print(f"{genome.kind} {seed} ({what}): {len(files)} files -> {out_dir}  ({time.perf_counter() - t0:.2f}s)")
     return 0
 
 
@@ -78,9 +115,8 @@ def cmd_preview(args) -> int:
         print(f"preview needs pygame-ce: pip install 'fishgen[preview]'  ({e})", file=sys.stderr)
         return 1
     seed = args.seed if args.seed is not None else random.randrange(1_000_000)
-    run(seed=seed, size=args.size, count=args.fish, zoom=args.zoom, swim_frames=args.swim_frames,
-        turn_frames=args.turn_frames, fps=args.fps, pitch=args.pitch, out=Path(args.out),
-        species=args.species, kind=args.kind, scale_by_size=not args.fixed_size)
+    run(seed=seed, count=args.fish, zoom=args.zoom, out=Path(args.out), species=args.species, kind=args.kind,
+        opts=render_opts(args))
     return 0
 
 
@@ -94,7 +130,7 @@ def cmd_gui(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="fishgen", description="Procedural pixel-art fish generator.")
+    parser = argparse.ArgumentParser(prog="fishgen", description="Procedural pixel-art sea-creature sprite generator.")
     sub = parser.add_subparsers(dest="command")
 
     gu = sub.add_parser("gui", help="open the fish designer window (the default with no command)")
@@ -121,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
     pv = sub.add_parser("preview", help="open a live aquarium window (needs pygame-ce)")
     _add_render_args(pv)
     pv.add_argument("--fish", type=int, default=1, help="number of fish in the tank (default 1)")
-    pv.add_argument("--zoom", type=int, default=4, help="pixel zoom (default 4)")
+    pv.add_argument("--zoom", type=float, default=4.0, help="zoom (default 4)")
     pv.add_argument("--out", default="out", help="where the E key exports to (default ./out)")
     pv.set_defaults(func=cmd_preview)
 

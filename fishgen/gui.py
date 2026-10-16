@@ -21,15 +21,16 @@ from tkinter import colorchooser, filedialog, messagebox, ttk
 
 from PIL import Image, ImageTk
 
-from .animation import SHOWCASE_ORDER, FishSprite, generate
+from .animation import DEFAULT_PX_PER_M, MAX_PX, MIN_PX, SHOWCASE_ORDER, FishSprite, generate
 from .export import FORMATS, export_all
 from .genome import (ALL_FIN_SHAPES, ALL_PATTERNS, ALL_TAIL_SHAPES, ARCHETYPES, EYE_STYLES, KINDS, LOBE_SHAPES,
                      PECTORAL_SHAPES, WING_SHAPES, FishGenome)
 from .kinds import kind_from_label, kind_label
-from .palette import ACCENT, ACCENT2, BASE, FIN, build_palette
-from .species import RANDOM, kind_of, make_genome, species_for
+from .palette import ACCENT, ACCENT2, BASE, FIN, FIN_DARK, build_palette
+from .species import RANDOM, kind_of, make_genome, morphs_of, species_for
 
 ANY = "Any"
+PREVIEW_MAX_PX = 420  # live previews of big animals are drawn smaller; exports use the full size
 SHOWCASE = "Showcase (full cycle)"
 BACKGROUNDS = ("Water", "Dark", "Light", "Checker")
 FORMAT_LABELS = {
@@ -42,14 +43,15 @@ FORMAT_LABELS = {
 # Gene controls, grouped by tab and section. A section is (title, kinds it applies to
 # or None for every kind, controls); sections for other kinds are hidden, and so is a
 # tab with nothing left to show. Each control is (label, genome path, type, extra)
-# where type is "float" (extra = (min, max)), "int" (extra = (min, max)),
-# "choice" (extra = options), "bool", or "color" (an optional #rrggbb override).
+# where type is "float" (extra = (min, max)), "int" (extra = (min, max)), "number" (a typed-in
+# float, extra = (min, max)), "choice" (extra = options), "bool", or "color" (an optional #rrggbb
+# override, extra = the palette slot shown while it is on auto).
 SWIMMERS = ("fish", "shark", "whale", "ray", "squid", "octopus")
 FINNED = ("fish", "shark", "whale")
 GENE_TABS: list[tuple[str, list[tuple[str, tuple | None, list[tuple]]]]] = [
     ("Body", [
         ("Size", None, [
-            ("Animal size", "size", "float", (0.3, 3.5)),
+            ("Length (cm)", "length_cm", "number", (1.0, 3000.0)),
         ]),
         ("Shape", None, [
             ("Body height", "height", "float", (0.06, 0.95)),
@@ -95,6 +97,14 @@ GENE_TABS: list[tuple[str, list[tuple[str, tuple | None, list[tuple]]]]] = [
             ("Body waves", "wave_count", "float", (0.3, 1.6)),
             ("Mantle pulse", "pulse", "float", (0.0, 0.25)),
         ]),
+        ("Skin & surface", None, [
+            ("Silvery sheen", "silver", "float", (0.0, 1.0)),
+            ("Wet gloss", "gloss", "float", (0.0, 1.0)),
+            ("Scale size", "scales", "float", (0.0, 0.06)),
+            ("Scars", "scars", "float", (0.0, 1.0)),
+            ("Knobs & barnacles", "knobs", "float", (0.0, 1.0)),
+            ("Eye colour", "iris_color", "color", FIN_DARK),
+        ]),
         ("Motion & camera", None, [
             ("Turn bend", "turn_lag", "float", (0.0, 1.2)),
             ("Extra camera tilt", "camera_tilt", "float", (0.0, 0.8)),
@@ -132,6 +142,8 @@ GENE_TABS: list[tuple[str, list[tuple[str, tuple | None, list[tuple]]]]] = [
             ("Pectoral shape", "pectoral_shape", "choice", PECTORAL_SHAPES),
             ("Pectoral angle", "pectoral_droop", "float", (0.2, 1.6)),
             ("Fin flutter", "pectoral_flap", "float", (0.0, 1.0)),
+            ("Fin opacity", "fin_alpha", "float", (0.1, 1.0)),
+            ("Finlets", "finlets", "int", (0, 10)),
             ("Pelvic fins", "pelvic.present", "bool", None),
             ("Pelvic position", "pelvic.start", "float", (0.2, 0.6)),
             ("Pelvic size", "pelvic.height", "float", (0.03, 0.25)),
@@ -172,12 +184,16 @@ GENE_TABS: list[tuple[str, list[tuple[str, tuple | None, list[tuple]]]]] = [
         ]),
         ("Fins & spines", ("fish", "shark", "whale", "ray", "urchin"), [
             ("Fin colour", "colors.fin_color", "color", FIN),
+            ("Tail colour", "colors.tail_color", "color", FIN),
+            ("Fin edge colour", "colors.fin_edge_color", "color", FIN_DARK),
             ("Hue shift (auto)", "colors.fin_hue_shift", "float", (-0.5, 0.5)),
         ]),
         ("Pattern", None, [
             ("Pattern", "colors.pattern", "choice", ALL_PATTERNS),
             ("Pattern colour", "colors.accent_color", "color", ACCENT),
             ("Second colour", "colors.accent2_color", "color", ACCENT2),
+            ("Rim round marks", "colors.accent_edge_color", "color", FIN_DARK),
+            ("Spots on the belly", "colors.belly_pattern", "bool", None),
             ("Stripes on fins", "colors.pattern_on_fins", "bool", None),
             ("Tail in body colour", "colors.tail_body_color", "bool", None),
             ("Hue shift (auto)", "colors.accent_hue_shift", "float", (-0.5, 0.5)),
@@ -266,10 +282,17 @@ class FishStudio:
         self.kind = tk.StringVar(value=kind_label(kind if species == RANDOM else kind_of(species)))
         self.species = tk.StringVar(value=species)
         self.archetype = tk.StringVar(value=ANY)
+        self.morph = tk.StringVar(value=ANY)
         self.seed = tk.IntVar(value=seed if seed is not None else random.randrange(1_000_000))
         # Sprite settings
-        self.width = tk.IntVar(value=32)
-        self.height = tk.IntVar(value=32)
+        self.width = tk.IntVar(value=64)
+        self.height = tk.IntVar(value=64)
+        self.px_per_m = tk.DoubleVar(value=DEFAULT_PX_PER_M)
+        self.min_px = tk.IntVar(value=MIN_PX)
+        self.max_px = tk.IntVar(value=MAX_PX)
+        self.pixel_art = tk.BooleanVar(value=True)
+        self.colors = tk.IntVar(value=0)
+        self.outline = tk.BooleanVar(value=True)
         self.swim_frames = tk.IntVar(value=8)
         self.turn_frames = tk.IntVar(value=10)
         self.fps = tk.DoubleVar(value=10.0)
@@ -295,9 +318,10 @@ class FishStudio:
         self._build()
 
         self.kind.trace_add("write", lambda *_: self._kind_changed())
-        for v in (self.species, self.archetype, self.seed):
+        for v in (self.species, self.archetype, self.seed, self.morph):
             v.trace_add("write", lambda *_: self._type_changed())
-        for v in (self.width, self.height, self.swim_frames, self.turn_frames, self.fps, self.pitch, self.scale_by_size):
+        for v in (self.width, self.height, self.swim_frames, self.turn_frames, self.fps, self.pitch, self.scale_by_size,
+                  self.px_per_m, self.min_px, self.max_px, self.pixel_art, self.colors, self.outline):
             v.trace_add("write", lambda *_: self.request_render())
         for v in (self.anim, self.zoom, self.background):
             v.trace_add("write", lambda *_: self.rebuild_frames())
@@ -358,17 +382,21 @@ class FishStudio:
                                      state="readonly", width=18)
         self.arch_box.grid(row=2, column=1, columnspan=2, sticky="ew", pady=3)
 
-        ttk.Label(box, text="Seed").grid(row=3, column=0, sticky="w", padx=(0, 8), pady=3)
+        ttk.Label(box, text="Variety").grid(row=3, column=0, sticky="w", padx=(0, 8), pady=3)
+        self.morph_box = ttk.Combobox(box, textvariable=self.morph, values=(ANY,), state="disabled", width=18)
+        self.morph_box.grid(row=3, column=1, columnspan=2, sticky="ew", pady=3)
+
+        ttk.Label(box, text="Seed").grid(row=4, column=0, sticky="w", padx=(0, 8), pady=3)
         ttk.Spinbox(box, textvariable=self.seed, from_=0, to=999_999_999, width=12) \
-            .grid(row=3, column=1, sticky="ew", pady=3)
-        ttk.Button(box, text="Random seed", command=self.random_seed).grid(row=3, column=2, sticky="ew", padx=(6, 0))
+            .grid(row=4, column=1, sticky="ew", pady=3)
+        ttk.Button(box, text="Random seed", command=self.random_seed).grid(row=4, column=2, sticky="ew", padx=(6, 0))
 
         btns = ttk.Frame(box)
-        btns.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(6, 0))
+        btns.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(6, 0))
         ttk.Button(btns, text="Surprise me", command=self.surprise).pack(side="left")
         ttk.Button(btns, text="Undo my tweaks", command=self.load_type).pack(side="left", padx=6)
         ttk.Label(box, text="Kind + species + seed = same animal. Tweaks below go on top.",
-                  foreground="#666").grid(row=5, column=0, columnspan=3, sticky="w", pady=(6, 0))
+                  foreground="#666").grid(row=6, column=0, columnspan=3, sticky="w", pady=(6, 0))
 
     def _section(self, parent, row: int, title: str) -> int:
         ttk.Label(parent, text=title, style="Section.TLabel").grid(
@@ -418,6 +446,11 @@ class FishStudio:
                 elif kind == "int":
                     var = tk.IntVar()
                     self._slider(box, row, label, var, *extra, fmt="{:.0f}", step=1)
+                elif kind == "number":
+                    var = tk.DoubleVar()
+                    ttk.Label(box, text=label).grid(row=row, column=0, sticky="w", padx=(8, 10), pady=2)
+                    ttk.Spinbox(box, textvariable=var, from_=extra[0], to=extra[1], increment=1.0, width=10) \
+                        .grid(row=row, column=1, sticky="w", pady=2)
                 elif kind == "choice":
                     var = tk.StringVar()
                     ttk.Label(box, text=label).grid(row=row, column=0, sticky="w", padx=(8, 10), pady=2)
@@ -486,18 +519,37 @@ class FishStudio:
 
     def _build_sprite_tab(self, p):
         p.columnconfigure(2, weight=1)
-        row = self._section(p, 0, "Canvas")
-        self._int_row(p, row, "Width (px)", self.width, 8, 256)
-        self._int_row(p, row + 1, "Height (px)", self.height, 8, 256)
+        row = self._section(p, 0, "Style")
+        ttk.Radiobutton(p, text="Pixel art", variable=self.pixel_art, value=True) \
+            .grid(row=row, column=0, sticky="w", padx=8)
+        ttk.Radiobutton(p, text="Smooth (anti-aliased, full colour)", variable=self.pixel_art, value=False) \
+            .grid(row=row, column=1, columnspan=2, sticky="w")
+        self._int_row(p, row + 1, "Colours", self.colors, 0, 256, "palette size, 0 = automatic")
+        ttk.Checkbutton(p, text="Dark outline", variable=self.outline) \
+            .grid(row=row + 2, column=0, columnspan=3, sticky="w", padx=8, pady=(0, 4))
+
+        row = self._section(p, row + 3, "Size")
+        ttk.Radiobutton(p, text="To scale: animals sized by their real length", variable=self.scale_by_size,
+                        value=True).grid(row=row, column=0, columnspan=3, sticky="w", padx=8)
+        ttk.Label(p, text="Pixels per metre").grid(row=row + 1, column=0, sticky="w", padx=(8, 10), pady=3)
+        ttk.Spinbox(p, textvariable=self.px_per_m, from_=1, to=2000, increment=2, width=8) \
+            .grid(row=row + 1, column=1, sticky="w", pady=3)
+        ttk.Label(p, text=f"{DEFAULT_PX_PER_M:g}: a great white is ~75px", foreground="#666") \
+            .grid(row=row + 1, column=2, sticky="w")
+        self._int_row(p, row + 2, "Smallest (px)", self.min_px, 4, 2048, "small fish are drawn at least this long")
+        self._int_row(p, row + 3, "Largest (px)", self.max_px, 8, 2048, "whales are shrunk to fit a sprite this big")
+        ttk.Radiobutton(p, text="Fixed canvas: every animal fitted into it", variable=self.scale_by_size,
+                        value=False).grid(row=row + 4, column=0, columnspan=3, sticky="w", padx=8, pady=(8, 0))
+        self._int_row(p, row + 5, "Width (px)", self.width, 8, 2048)
+        self._int_row(p, row + 6, "Height (px)", self.height, 8, 2048)
         sizes = ttk.Frame(p)
-        sizes.grid(row=row + 2, column=0, columnspan=3, sticky="w", padx=8, pady=(2, 0))
-        for n in (16, 24, 32, 48, 64, 96):
+        sizes.grid(row=row + 7, column=0, columnspan=3, sticky="w", padx=8, pady=(2, 0))
+        for n in (16, 24, 32, 48, 64, 96, 128, 256):
             ttk.Button(sizes, text=str(n), width=4,
-                       command=lambda n=n: (self.width.set(n), self.height.set(n))).pack(side="left", padx=(0, 3))
-        ttk.Checkbutton(p, text="Scale canvas with animal size (sharks get bigger sprites)",
-                        variable=self.scale_by_size).grid(row=row + 3, column=0, columnspan=3, sticky="w", padx=8, pady=(4, 0))
+                       command=lambda n=n: (self.width.set(n), self.height.set(n), self.scale_by_size.set(False))) \
+                .pack(side="left", padx=(0, 3))
         row += 1
-        row = self._section(p, row + 3, "Animation")
+        row = self._section(p, row + 7, "Animation")
         self._int_row(p, row, "Swim frames", self.swim_frames, 2, 48, "per tail beat")
         self._int_row(p, row + 1, "Turn frames", self.turn_frames, 2, 64, "per turn-around")
         self._int_row(p, row + 2, "Frames / sec", self.fps, 1, 60)
@@ -576,7 +628,15 @@ class FishStudio:
         except (tk.TclError, ValueError):
             return
         arch = self.archetype.get()
-        self.base_genome = make_genome(species, seed, None if arch == ANY or species != RANDOM else arch, kind=kind)
+        morphs = morphs_of(species) if species != RANDOM else ()
+        self.morph_box.configure(values=(ANY, *morphs), state="readonly" if morphs else "disabled")
+        morph = self.morph.get() if self.morph.get() in morphs else None
+        if self.morph.get() not in (ANY, *morphs):
+            self._batch, batch = True, self._batch
+            self.morph.set(ANY)
+            self._batch = batch
+        self.base_genome = make_genome(species, seed, None if arch == ANY or species != RANDOM else arch, kind=kind,
+                                       morph=morph)
         self._show_kind_controls(kind)
         self._loading = True
         try:
@@ -596,6 +656,8 @@ class FishStudio:
             value = var.get()
             if path.endswith(("_color",)):
                 value = value or None
+            elif path == "length_cm":
+                value = max(0.5, float(value))
             _set(g, path, value)
         for fin in (g.dorsal, g.anal, g.dorsal2, g.wings):
             fin.end = max(fin.end, fin.start + 0.05)
@@ -683,11 +745,20 @@ class FishStudio:
             opts = dict(width=int(self.width.get()), height=int(self.height.get()),
                         swim_frames=int(self.swim_frames.get()), turn_frames=int(self.turn_frames.get()),
                         fps=float(self.fps.get()), pitch=float(self.pitch.get()),
-                        scale_by_size=bool(self.scale_by_size.get()))
+                        scale_by_size=bool(self.scale_by_size.get()), px_per_m=float(self.px_per_m.get()),
+                        min_px=int(self.min_px.get()), max_px=int(self.max_px.get()),
+                        style="pixel" if self.pixel_art.get() else "smooth", colors=int(self.colors.get()) or None,
+                        outline=bool(self.outline.get()))
         except (tk.TclError, ValueError):
             raise ValueError("Sprite settings must be numbers")
-        if not (8 <= opts["width"] <= 512 and 8 <= opts["height"] <= 512):
-            raise ValueError("Size must be between 8 and 512 pixels")
+        if opts["colors"] is not None and not 2 <= opts["colors"] <= 256:
+            raise ValueError("Colours must be 0 (automatic) or 2 to 256")
+        if opts["max_px"] < opts["min_px"]:
+            raise ValueError("The largest size must be at least the smallest")
+        if not (8 <= opts["width"] <= 2048 and 8 <= opts["height"] <= 2048):
+            raise ValueError("Size must be between 8 and 2048 pixels")
+        if opts["px_per_m"] <= 0 or opts["min_px"] < 1:
+            raise ValueError("Pixels per metre and the smallest size must be above 0")
         if opts["swim_frames"] < 2 or opts["turn_frames"] < 2 or opts["fps"] <= 0:
             raise ValueError("Need at least 2 frames per animation and fps above 0")
         return opts
@@ -709,6 +780,8 @@ class FishStudio:
         except (ValueError, tk.TclError) as e:
             self.status.set(str(e))
             return
+        # Big animals at real scale take a while to draw: preview them smaller, export at full size.
+        opts = dict(opts, max_px=min(opts["max_px"], PREVIEW_MAX_PX))
         self._job += 1
         with self._lock:
             self._pending = (self._job, genome, opts)
@@ -748,8 +821,14 @@ class FishStudio:
                         self.anim.set(SHOWCASE)
                     w, h = sprite.size
                     busy = " (updating...)" if job_id < self._job else ""
-                    self.status.set(f"{w}x{h} sprite, {sum(len(a.frames) for a in sprite.animations.values())} "
-                                    f"frames, rendered in {dt:.2f}s{busy}")
+                    g = sprite.genome
+                    note = ""
+                    if self.scale_by_size.get():
+                        if int(self.max_px.get()) > PREVIEW_MAX_PX and max(w, h) >= PREVIEW_MAX_PX - 2:
+                            note = f" - preview shrunk, exports up to {int(self.max_px.get())}px"
+                    self.status.set(f"{g.morph + ' ' if g.morph else ''}{g.length_cm:.0f} cm, {w}x{h} sprite, "
+                                    f"{sum(len(a.frames) for a in sprite.animations.values())} frames, "
+                                    f"rendered in {dt:.2f}s{busy}{note}")
                     self.rebuild_frames()
         except queue.Empty:
             pass
@@ -769,11 +848,13 @@ class FishStudio:
         w, h = self.sprite.size
         cw, ch = max(1, self.view.winfo_width()), max(1, self.view.winfo_height())
         if self.zoom.get() == "Fit":
-            zoom = max(1, min((cw - 40) // w, (ch - 40) // h))
+            zoom = min((cw - 40) / w, (ch - 40) / h)
+            zoom = max(1, int(zoom)) if zoom >= 1 else max(zoom, 0.05)
         else:
             zoom = int(self.zoom.get().rstrip("x"))
-        self._frames = [ImageTk.PhotoImage(Image.fromarray(f).resize((w * zoom, h * zoom), Image.NEAREST))
-                        for f in frames]
+        size = (max(1, round(w * zoom)), max(1, round(h * zoom)))
+        resample = Image.NEAREST if zoom >= 1 else Image.LANCZOS
+        self._frames = [ImageTk.PhotoImage(Image.fromarray(f).resize(size, resample)) for f in frames]
         self._frame_i %= len(self._frames)
         self._draw_background(cw, ch)
         self.view.delete("fish")

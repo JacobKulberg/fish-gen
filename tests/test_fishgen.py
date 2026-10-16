@@ -7,7 +7,10 @@ import pytest
 from fishgen import FishGenome, generate
 from fishgen.animation import SHOWCASE_ORDER, build_animations
 from fishgen.cli import main, parse_size
-from fishgen.palette import OUTLINE, TRANSPARENT
+
+
+def opaque(frame: np.ndarray) -> np.ndarray:
+    return frame[..., 3] > 0
 
 
 @pytest.fixture(scope="module")
@@ -16,7 +19,7 @@ def sprite():
 
 
 def test_same_seed_same_fish():
-    a, b = generate(7, 24, 24), generate(7, 24, 24)
+    a, b = generate(7, 24, 24, scale_by_size=False), generate(7, 24, 24, scale_by_size=False)
     for name in a.animations:
         for fa, fb in zip(a.animations[name].frames, b.animations[name].frames):
             assert np.array_equal(fa, fb)
@@ -39,22 +42,84 @@ def test_non_square_size():
     assert s.animations["swim_right"].frames[0].shape == (32, 48, 4)
 
 
-def test_fish_fits_inside_canvas_with_outline(sprite):
-    # Every frame is drawn, and nothing touches the canvas edge (room for the outline).
+def test_fish_fits_inside_canvas(sprite):
+    # Every frame is drawn, and nothing touches the canvas edge.
     for anim in sprite.animations.values():
-        for idx in anim.indexed:
-            assert (idx != TRANSPARENT).sum() > 20
-            assert not idx[0].any() and not idx[-1].any()
-            assert not idx[:, 0].any() and not idx[:, -1].any()
+        for f in anim.frames:
+            a = f[..., 3]
+            assert (a > 0).sum() > 20
+            assert not a[0].any() and not a[-1].any()
+            assert not a[:, 0].any() and not a[:, -1].any()
 
 
-def test_silhouette_is_outlined(sprite):
-    # Every opaque pixel that touches transparency must be an outline pixel.
-    idx = sprite.animations["swim_right"].indexed[0]
-    filled = idx != TRANSPARENT
-    padded = np.pad(filled, 1)
-    touches_empty = ~(padded[:-2, 1:-1] & padded[2:, 1:-1] & padded[1:-1, :-2] & padded[1:-1, 2:])
-    assert np.all(idx[filled & touches_empty] == OUTLINE)
+def test_frames_are_pixel_art():
+    """By default: hard edges, one small palette shared by every frame, and a dark outline."""
+    s = generate(3, 96, 64, scale_by_size=False)
+    assert s.style == "pixel" and s.palette is not None and len(s.palette) <= 32
+    pal = {tuple(int(v) for v in c) for c in s.palette}
+    for anim in s.animations.values():
+        for f in anim.frames:
+            assert set(np.unique(f[..., 3])) <= {0, 255}  # no half-transparent pixels
+            assert {tuple(c) for c in f[opaque(f)][:, :3]} <= pal
+    # The pixels round the silhouette are the outline: darker than the animal inside it.
+    f = s.animations["swim_right"].frames[0]
+    on = opaque(f)
+    inner = on.copy()
+    for dy, dx in ((0, 1), (0, -1), (1, 0), (-1, 0)):
+        inner &= np.roll(on, (dy, dx), axis=(0, 1))
+    lum = f[..., :3].astype(float).mean(-1)
+    assert lum[on & ~inner].mean() < 0.6 * lum[inner].mean()
+
+
+@pytest.mark.parametrize("size", [16, 24, 32, 48, 64, 96, 128])
+def test_pixel_art_sizes(size):
+    from fishgen.species import make_genome
+
+    s = generate(1, size, size, genome=make_genome("Clownfish", 1), scale_by_size=False, swim_frames=2,
+                 turn_frames=2)
+    f = s.animations["swim_right"].frames[0]
+    assert f.shape == (size, size, 4) and opaque(f).sum() > size
+    assert len(s.palette) <= 32
+
+
+def test_palette_size_and_outline_options():
+    s = generate(5, 48, 48, scale_by_size=False, colors=6, outline=False, swim_frames=2, turn_frames=2)
+    assert len(s.palette) == 6
+    t = generate(5, 48, 48, scale_by_size=False, colors=6, swim_frames=2, turn_frames=2)
+    assert 6 < len(t.palette) <= 9  # plus a few outline shades
+    # The outline goes round the outside, so the outlined sprite covers more pixels.
+    f0, f1 = s.animations["swim_right"].frames[0], t.animations["swim_right"].frames[0]
+    assert opaque(f1).sum() > opaque(f0).sum()
+
+
+def test_smooth_style_is_full_colour_and_anti_aliased():
+    s = generate(3, 96, 64, scale_by_size=False, style="smooth")
+    assert s.palette is None
+    f = s.animations["swim_right"].frames[0]
+    colours = {tuple(c) for c in f[opaque(f)][:, :3]}
+    assert len(colours) > 200  # shaded, textured, not a handful of palette slots
+    edge = f[..., 3]
+    assert ((edge > 0) & (edge < 255)).sum() > 20  # soft, supersampled silhouette
+    with pytest.raises(ValueError):
+        generate(3, 32, 32, scale_by_size=False, style="watercolour")
+
+
+def test_native_code_matches_numpy(monkeypatch):
+    """The C hot loops give the same frames as the numpy fallback."""
+    from fishgen import native
+    from fishgen.render import FishRenderer
+    from fishgen.species import make_genome
+
+    if native.lib is None:
+        pytest.skip("no C compiler: running on the numpy fallback")
+    poses = build_animations(2, 2)["swim_right"].poses
+    for name in ("Great white shark", "Long-spined urchin", "Octopus"):
+        r = FishRenderer(make_genome(name, 1), 48, 48, fit_poses=poses)
+        fast = r.render(poses[1])
+        monkeypatch.setattr(native, "lib", None)
+        slow = r.render(poses[1])
+        monkeypatch.undo()
+        assert np.abs(fast.astype(int) - slow.astype(int)).max() <= 1, name
 
 
 def test_animation_chain_is_closed():
@@ -95,7 +160,7 @@ def test_parse_size():
 
 
 def test_cli_exports_everything(tmp_path):
-    assert main(["generate", "--seed", "5", "--size", "24", "--fixed-size", "--out", str(tmp_path), "--flat"]) == 0
+    assert main(["generate", "--seed", "5", "--size", "24", "--out", str(tmp_path), "--flat"]) == 0
     data = json.loads((tmp_path / "fish_5.json").read_text())
     assert set(data["animations"]) == {n for n in SHOWCASE_ORDER if not n.startswith("puff")}
     assert data["meta"]["frame_size"] == [24, 24]
@@ -111,8 +176,8 @@ def test_species_presets_render():
     from fishgen.species import SPECIES_NAMES, make_genome
 
     for name in SPECIES_NAMES:
-        s = generate(1, 24, 24, genome=make_genome(name, 1), scale_by_size=False)
-        assert (s.animations["swim_right"].indexed[0] != TRANSPARENT).sum() > 20
+        s = generate(1, 24, 24, genome=make_genome(name, 1), scale_by_size=False, swim_frames=2, turn_frames=2)
+        assert opaque(s.animations["swim_right"].frames[0]).sum() > 20
 
 
 def test_forced_archetype_and_dict_roundtrip():
@@ -122,7 +187,7 @@ def test_forced_archetype_and_dict_roundtrip():
     assert FishGenome.from_dict(json.loads(json.dumps(g.to_dict()))) == g
 
 
-def test_colour_overrides_reach_palette():
+def test_colour_overrides_reach_palette():  # the GUI's swatches and the JSON's key colours
     from fishgen.palette import ACCENT, FIN, build_palette
 
     g = FishGenome.random(4)
@@ -135,21 +200,24 @@ def test_every_species_fits_canvas():
     from fishgen.species import SPECIES_NAMES, make_genome
 
     for name in SPECIES_NAMES:
-        s = generate(2, 32, 32, genome=make_genome(name, 2))
+        s = generate(2, 32, 32, genome=make_genome(name, 2), scale_by_size=False, swim_frames=4, turn_frames=4)
         for anim in s.animations.values():
-            for idx in anim.indexed:
-                assert (idx != TRANSPARENT).sum() > 12, name
-                # Only the outline may reach the canvas edge: nothing is cut off.
-                border = np.concatenate([idx[0], idx[-1], idx[:, 0], idx[:, -1]])
-                assert np.isin(border, (TRANSPARENT, OUTLINE)).all(), name
+            for f in anim.frames:
+                a = f[..., 3]
+                assert (a > 0).sum() > 12, name
+                # Nothing is cut off at the canvas edge.
+                border = np.concatenate([a[0], a[-1], a[:, 0], a[:, -1]])
+                assert (border == 0).all(), name
 
 
 def test_old_genome_dicts_still_load():
     d = FishGenome.random(3).to_dict()
-    for key in ("profile", "beak", "wings", "arms", "spines", "dorsal2", "hammer", "turn_lag"):
+    for key in ("profile", "beak", "wings", "arms", "spines", "dorsal2", "hammer", "turn_lag", "silver", "scales"):
         d.pop(key)
     d["colors"].pop("fin_tips")
-    assert FishGenome.from_dict(d) == FishGenome.random(3)
+    d["size"] = 1.2  # a gene that no longer exists
+    g = FishGenome.from_dict(d)
+    assert g.kind == "fish" and g.height == FishGenome.random(3).height
 
 
 def test_whales_beat_up_and_down():
@@ -179,10 +247,11 @@ def test_new_body_parts_are_built():
 KIND_SIGNATURE = {
     "fish": lambda g: g.tail_shape in ("forked", "rounded", "truncate", "lunate", "pointed", "fan", "none")
     and not g.wings.present and not g.arms.count and not g.spines.count and not g.swim_vertical,
-    "shark": lambda g: g.tail_shape == "heterocercal" and g.gill_slits == 5 and g.dorsal.present
+    "shark": lambda g: g.tail_shape in ("heterocercal", "lunate") and g.gill_slits == 5 and g.dorsal.present
     and g.dorsal2.present and g.eye_style == "dark" and not g.wings.present,
     "whale": lambda g: g.tail_shape == "flukes" and g.swim_vertical and not g.anal.present and g.gill_slits == 0,
-    "ray": lambda g: g.wings.present and g.tail_shape == "none" and g.camera_tilt > 0 and not g.arms.count,
+    # Rays are seen from the side like everything else: only a gentle extra tilt, never top-down.
+    "ray": lambda g: g.wings.present and g.tail_shape == "none" and 0 < g.camera_tilt < 0.2 and not g.arms.count,
     "squid": lambda g: g.arms.count == 8 and g.wings.present and g.tail_shape == "none" and g.pulse > 0,
     "octopus": lambda g: g.arms.count == 8 and g.arms.tentacles == 0 and g.tail_shape == "none",
     "urchin": lambda g: g.profile == "sphere" and g.spines.count > 0 and g.eye_style == "none",
@@ -211,7 +280,8 @@ def test_presets_belong_to_their_kind():
 
 
 def test_cli_kind_option(tmp_path):
-    assert main(["generate", "--kind", "octopus", "--seed", "3", "--size", "24", "--out", str(tmp_path),
+    assert main(["generate", "--kind", "octopus", "--seed", "3", "--size", "24", "--swim-frames", "2",
+                 "--turn-frames", "2", "--out", str(tmp_path),
                  "--formats", "sheet"]) == 0
     data = json.loads((tmp_path / "octopus_3" / "octopus_3.json").read_text())
     assert data["genome"]["kind"] == "octopus"
@@ -225,21 +295,93 @@ def test_every_species_varies_with_the_seed():
 
     for name in SPECIES_NAMES:
         gs = [make_genome(name, seed) for seed in range(8)]
-        assert len({round(g.height, 4) for g in gs}) == 8, name
+        assert len({g.height for g in gs}) == 8, name
         assert len({(round(g.colors.hue, 4), round(g.colors.value, 4)) for g in gs}) == 8, name
         assert len({g.kind for g in gs}) == 1, name
 
 
-def test_bigger_animals_get_bigger_sprites():
+def test_animals_are_drawn_to_scale():
+    """At real scale an animal's drawn length follows its real length, ``px_per_m`` to the metre."""
+    from fishgen.animation import px_per_unit
+    from fishgen.geometry import FishModel
     from fishgen.species import make_genome
 
-    tetra = generate(1, 32, 32, genome=make_genome("Neon tetra", 1))
-    koi = generate(1, 32, 32, genome=make_genome("Koi", 1))
-    shark = generate(1, 32, 32, genome=make_genome("Great white shark", 1))
-    whale = generate(1, 32, 32, genome=make_genome("Humpback whale", 1))
-    widths = [s.size[0] for s in (tetra, koi, shark, whale)]
-    assert widths == sorted(widths) and widths[0] < 32 < widths[2]
-    assert generate(1, 32, 32, genome=make_genome("Great white shark", 1), scale_by_size=False).size == (32, 32)
+    lengths = {}
+    for name in ("Koi", "Great white shark", "Bottlenose dolphin", "Tuna"):
+        g = make_genome(name, 1)
+        drawn = px_per_unit(g, 50.0, max_px=1600) * FishModel(g, detail=24).real_extent()
+        assert drawn == pytest.approx(g.length_cm / 100 * 50.0)
+        lengths[name] = (g.length_cm, drawn)
+    order = sorted(lengths, key=lambda n: lengths[n][0])
+    assert order == sorted(lengths, key=lambda n: lengths[n][1])
+    # By default a 1 m animal is 16 px long, from 16 px for the smallest to 128 px for whales.
+    assert px_per_unit(g) * FishModel(g, detail=24).real_extent() == pytest.approx(
+        min(128, max(16, g.length_cm / 100 * 16)))
+    # Whales are shrunk to fit the biggest sprite, 128 px.
+    whale = generate(1, genome=make_genome("Humpback whale", 1), swim_frames=2, turn_frames=2)
+    assert max(whale.size) <= 128 and max(whale.size) >= 120
+    # Tiny animals stop at the minimum size; the canvas fits the animal, not a fixed square.
+    tetra = make_genome("Neon tetra", 1)
+    assert px_per_unit(tetra, 100.0, min_px=16) * FishModel(tetra, detail=24).real_extent() == pytest.approx(16)
+    s = generate(1, genome=make_genome("Koi", 1), px_per_m=40.0, swim_frames=2, turn_frames=2)
+    w, h = s.size
+    assert w > h and 20 < w < 60
+    assert generate(1, 32, 32, genome=make_genome("Great white shark", 1), scale_by_size=False,
+                    swim_frames=2, turn_frames=2).size == (32, 32)
+
+
+def test_real_lengths_are_realistic():
+    from fishgen.species import make_genome
+
+    def cm(name):
+        return [make_genome(name, s).length_cm for s in range(6)]
+
+    assert max(cm("Neon tetra")) < 5 < min(cm("Clownfish")) and max(cm("Clownfish")) < 15
+    assert 300 < min(cm("Great white shark")) and max(cm("Humpback whale")) < 1800 < min(cm("Humpback whale")) * 2
+    assert min(cm("Whale shark")) > max(cm("Great white shark"))
+    assert len({round(x, 3) for x in cm("Koi")}) == 6  # individuals differ in size
+
+
+def test_species_come_in_colour_varieties():
+    from fishgen.species import make_genome, morphs_of
+
+    assert {"Kohaku", "Showa", "Ogon"} <= set(morphs_of("Koi"))
+    seen = {make_genome("Koi", s).morph for s in range(40)}
+    assert len(seen) >= 4
+    showa = make_genome("Koi", 3, morph="Showa")
+    assert showa.morph == "Showa" and showa.colors.value < 0.3
+    with pytest.raises(ValueError):
+        make_genome("Koi", 3, morph="Tabby")
+    assert make_genome("Tiger shark", 1).morph == ""
+
+
+def test_rays_show_their_pale_underside_on_the_upstroke():
+    """Seen from the side, a raised near wing turns its white belly to the viewer."""
+    from fishgen.geometry import FishModel, Pose, WING_NEAR
+    from fishgen.species import make_genome
+
+    g = make_genome("Manta ray", 1, morph="Chevron")
+    m = FishModel(g, detail=48)
+    near = np.unique(m.mesh.tris[m.mesh.tri_part == WING_NEAR])
+    pitch = 0.25 + g.camera_tilt
+    under = []
+    for ph in np.linspace(0, 1, 8, endpoint=False):
+        cam, nrm, *_ = m.posed(Pose(phase=ph, pitch=pitch))
+        under.append((nrm[near][:, 2] < 0).mean())  # wing normals point out of the top
+    # On the downstroke we see the top of the near wing; as it rises, much of it turns its underside to us.
+    assert max(under) > 0.4 and min(under) < 0.1
+    # The wing beats through a big arc: its lowest point on screen swings by well over a quarter body length.
+    ys = [m.posed(Pose(phase=ph, pitch=pitch))[0][near, 1].min() for ph in np.linspace(0, 1, 8, endpoint=False)]
+    assert np.ptp(ys) > 0.3
+
+
+def test_morph_option_on_the_command_line(tmp_path):
+    assert main(["generate", "--species", "Koi", "--morph", "Ogon", "--seed", "2", "--size", "24",
+                 "--swim-frames", "2", "--turn-frames", "2", "--formats", "sheet", "--out", str(tmp_path)]) == 0
+    data = json.loads((tmp_path / "fish_2" / "fish_2.json").read_text())
+    assert data["genome"]["morph"] == "Ogon"
+    with pytest.raises(SystemExit):
+        main(["generate", "--species", "Koi", "--morph", "Tabby", "--out", str(tmp_path)])
 
 
 def test_pufferfish_puffs_up_with_spikes():
@@ -247,19 +389,20 @@ def test_pufferfish_puffs_up_with_spikes():
     from fishgen.species import make_genome
 
     g = make_genome("Pufferfish", 1)
-    s = generate(1, 32, 32, genome=g)
+    s = generate(1, 48, 48, genome=g, scale_by_size=False)
     assert {"puff_right", "puff_left"} <= set(s.animations)
     puff = s.animations["puff_right"]
     assert puff.next == "swim_right" and not puff.loop
     assert puff.poses[0].inflate == 0 and max(p.inflate for p in puff.poses) == 1.0
     # Puffed up, it is far bigger than when calm, and only then are the spikes out.
-    calm = (puff.indexed[0] != TRANSPARENT).sum()
-    big = max((f != TRANSPARENT).sum() for f in puff.indexed)
+    calm = opaque(puff.frames[0]).sum()
+    big = max(opaque(f).sum() for f in puff.frames)
     assert big > 2 * calm
     model = FishModel(g)
     assert len(model._spine_lines(0.0, 0.0)) == 0 and len(model._spine_lines(0.0, 1.0)) == g.puff_spines
     # Other fish don't puff.
-    assert "puff_right" not in generate(1, 24, 24, genome=make_genome("Koi", 1)).animations
+    assert "puff_right" not in generate(1, 24, 24, genome=make_genome("Koi", 1), scale_by_size=False,
+                                        swim_frames=2, turn_frames=2).animations
 
 
 def test_orcas_come_as_males_and_females():
@@ -270,11 +413,16 @@ def test_orcas_come_as_males_and_females():
 
 
 def test_great_white_has_teeth():
-    from fishgen.palette import EYE
     from fishgen.species import make_genome
 
     g = make_genome("Great white shark", 1)
     assert g.teeth and g.mouth > 0
-    s = generate(1, 48, 48, genome=g)
-    # The mouth (dark, with white teeth) shows on the side of the head.
-    assert any((f == EYE).sum() >= 3 for f in s.animations["swim_right"].indexed)
+    s = generate(1, 400, 200, genome=g, scale_by_size=False, swim_frames=2, turn_frames=2, style="smooth")
+    f = s.animations["swim_right"].frames[0]
+    # The open jaw (near-black gape) with pale teeth in it shows on the side of the head, at the front.
+    head = f[:, f.shape[1] // 2:]
+    rgb = head[..., :3].astype(int)
+    on = head[..., 3] == 255
+    gape = on & (rgb.max(axis=-1) < 50)
+    teeth = on & (rgb.min(axis=-1) > 170)
+    assert gape.sum() >= 3 and teeth.sum() >= 2

@@ -10,6 +10,7 @@ from PIL import Image
 
 from . import __version__
 from .animation import SHOWCASE_ORDER, FishSprite
+from .geometry import FishModel
 
 FORMATS = ("gif", "sheet", "godot", "frames")
 
@@ -29,16 +30,45 @@ def _parse_hex(color: str) -> tuple[int, int, int]:
 
 def save_gif(sprite: FishSprite, frames: list[np.ndarray], path: Path, fps: float,
              scale: int = 4, background: str | None = None) -> Path:
-    """Write palette-indexed frames as a GIF (transparent unless a background is given)."""
-    pal = list(sprite.renderer.palette.colors)
-    if background:
-        pal[0] = _parse_hex(background)
-    flat = [c for rgb in pal for c in rgb]
-    images = []
+    """Write RGBA frames as a GIF (transparent unless a background is given).
+
+    Pixel-art frames already share one small palette and go in exactly. Smooth frames are
+    reduced to one adaptive 256-colour palette for the whole animation (no colour flicker
+    between frames), and GIF's on/off transparency flattens their translucent fins: over the
+    background if one is given, otherwise over a mid-water blue and then cut off.
+    """
+    bg = np.array(_parse_hex(background) if background else (30, 70, 105), dtype=np.float64)
+    flat = []
     for f in frames:
-        im = Image.frombytes("P", (f.shape[1], f.shape[0]), np.ascontiguousarray(f, dtype=np.uint8).tobytes())
-        im.putpalette(flat)
-        images.append(_upscale(im, scale))
+        a = f[..., 3:4].astype(np.float64) / 255.0
+        rgb = f[..., :3] * a + bg * (1 - a)
+        flat.append(np.round(rgb).astype(np.uint8))
+    h, w = frames[0].shape[:2]
+    # One palette for the whole animation, from a mosaic of every frame's visible pixels.
+    opaque = [im[f[..., 3] >= 128] for im, f in zip(flat, frames)]
+    pool = np.concatenate([o for o in opaque if len(o)] or [np.zeros((1, 3), np.uint8)])
+    if len(pool) > 200_000:
+        pool = pool[np.random.default_rng(0).choice(len(pool), 200_000, replace=False)]
+    side = int(np.ceil(np.sqrt(len(pool))))
+    mosaic = np.zeros((side * side, 3), np.uint8)
+    mosaic[:len(pool)] = pool
+    mosaic[len(pool):] = pool[0]
+    pal_img = Image.fromarray(mosaic.reshape(side, side, 3)).quantize(colors=255, method=Image.Quantize.MEDIANCUT)
+    images = []
+    for im, f in zip(flat, frames):
+        q = np.array(Image.fromarray(im).quantize(palette=pal_img, dither=Image.Dither.NONE))
+        q = q + 1  # index 0 is kept for transparency
+        if background:
+            q[f[..., 3] < 8] = 1 + np.array(Image.fromarray(np.full((1, 1, 3), bg, np.uint8))
+                                          .quantize(palette=pal_img, dither=Image.Dither.NONE))[0, 0]
+        else:
+            q[f[..., 3] < 128] = 0
+        p = Image.fromarray(q.astype(np.uint8), "P")
+        pal = [0, 0, 0] + pal_img.getpalette()[:255 * 3]
+        if background:
+            pal[0:3] = list(bg.astype(int))
+        p.putpalette(pal)
+        images.append(_upscale(p, scale))
     kwargs = dict(save_all=True, append_images=images[1:], duration=round(1000 / fps), loop=0,
                   disposal=2, optimize=False)
     if not background:
@@ -52,9 +82,9 @@ def export_gifs(sprite: FishSprite, out_dir: Path, scale: int = 4, background: s
     gif_dir.mkdir(parents=True, exist_ok=True)
     paths = []
     for name, anim in sprite.animations.items():
-        paths.append(save_gif(sprite, anim.indexed, gif_dir / f"{name}.gif", anim.fps, scale, background))
+        paths.append(save_gif(sprite, anim.frames, gif_dir / f"{name}.gif", anim.fps, scale, background))
     fps = sprite.animations["swim_right"].fps
-    paths.append(save_gif(sprite, sprite.showcase(indexed=True), gif_dir / "showcase.gif", fps, scale, background))
+    paths.append(save_gif(sprite, sprite.showcase(), gif_dir / "showcase.gif", fps, scale, background))
     return paths
 
 
@@ -92,9 +122,15 @@ def export_sheet(sprite: FishSprite, out_dir: Path, stem: str, padding: int = 0)
         "image_size": [img.width, img.height],
         "frame_size": [w, h],
         "pivot": [w / 2, h / 2],
+        "length_cm": round(sprite.genome.length_cm, 1),
+        "px_per_m": round(sprite.renderer.scale * FishModel(sprite.genome, detail=24).real_extent()
+                          / sprite.genome.length_cm * 100.0, 2),
         "padding": padding,
+        "style": sprite.style,
         "palette": sprite.renderer.palette.to_dict(),
     }
+    if sprite.palette is not None:  # pixel art: every colour the frames use
+        meta["colors"] = ["#%02x%02x%02x" % tuple(int(v) for v in c) for c in sprite.palette]
     animations = {}
     for name, anim in sprite.animations.items():
         animations[name] = {

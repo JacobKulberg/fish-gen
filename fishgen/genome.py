@@ -18,7 +18,8 @@ SPECIAL_FINS = ("falcate", "pennant")
 ALL_FIN_SHAPES = FIN_SHAPES + SPECIAL_FINS
 PATTERNS = ("none", "stripes", "spots", "lateral", "saddle", "gradient", "bands", "tiger", "shimmer")
 # Patterns random fish never pick.
-SPECIAL_PATTERNS = ("orca", "rings", "neon", "whale_shark", "mackerel")
+SPECIAL_PATTERNS = ("orca", "rings", "neon", "whale_shark", "mackerel", "koi", "calico", "discus", "chevron",
+                    "trout", "salmon", "blotches", "tang", "dolphin_cape", "barracuda", "humpback", "red_belly")
 ALL_PATTERNS = PATTERNS + SPECIAL_PATTERNS
 ARCHETYPES = ("slender", "torpedo", "classic", "deep", "round")
 # What sort of animal a genome is. Decided first; every other gene is drawn to suit it (see kinds.py).
@@ -96,6 +97,10 @@ class ColorGenes:
     belly_level: float | None = None  # where the pale belly starts (-1 belly .. 1 back); None = from belly_lightness
     pattern_on_fins: bool = False  # stripes carry on across the dorsal, anal and tail fins (angelfish)
     tail_body_color: bool = False  # tail fin painted in the body colours instead of the fin colour
+    tail_color: str | None = None  # tail fin colour when it differs from the other fins (blue tang)
+    fin_edge_color: str | None = None  # thin margin round the fins (a clownfish's black edges)
+    accent_edge_color: str | None = None  # thin margin round pattern marks (black rims on clownfish bands)
+    belly_pattern: bool = False  # ventral spots too (individual manta belly spots)
 
 
 @dataclass
@@ -142,7 +147,6 @@ class FishGenome:
     pulse: float = 0.0  # mantle squeeze per swim cycle (squid jet propulsion)
     camera_tilt: float = 0.0  # extra camera tilt, e.g. to see a ray from above
     turn_lag: float = 0.9  # how far the tail trails the head through a turn (0 = turn rigidly)
-    size: float = 1.0  # how big the animal is next to others: the sprite canvas scales by this
     pectoral_shape: str = "lobe"  # one of PECTORAL_SHAPES
     pectoral_droop: float = 0.45  # how steeply the pectoral fins angle down (blades)
     melon: float = 0.0  # forehead bulge (dolphins, belugas), relative to body length
@@ -156,6 +160,17 @@ class FishGenome:
     puff: float = 0.0  # pufferfish: how much it inflates when it puffs up (0 = can't)
     puff_spines: int = 0  # spikes that stand up when puffed
     pleats: bool = False  # throat grooves (rorqual whales)
+    # --- realism ---
+    length_cm: float = 30.0  # real adult length (rays: disc width, urchins: shell diameter); sets the sprite scale
+    silver: float = 0.0  # 0 = plain skin .. 1 = mirror-bright silvery flanks (tuna, mackerel)
+    gloss: float = 0.35  # wet specular sheen
+    scales: float = 0.0  # scale size relative to body length (0 = smooth skin: sharks, whales, eels)
+    fin_alpha: float = 0.8  # fin membrane opacity (1 = fleshy, opaque fins)
+    iris_color: str | None = None  # "#rrggbb" ring round the pupil (None: picked from the kind)
+    finlets: int = 0  # little yellow tuna finlets along the back and belly in front of the tail
+    scars: float = 0.0  # pale scratches and nicks in the skin (old sharks and whales)
+    knobs: float = 0.0  # tubercles on the head and flipper edges (humpbacks)
+    morph: str = ""  # named colour variety within a species, e.g. a koi's "Kohaku"
 
     @classmethod
     def random(cls, seed: int, archetype: str | None = None) -> "FishGenome":
@@ -216,8 +231,8 @@ class FishGenome:
         colors.accent2_color = "#%02x%02x%02x" % tuple(round(c * 255) for c in colorsys.hsv_to_rgb(
             a2, r.uniform(0.6, 0.95), r.uniform(0.75, 1.0)))
         colors.pattern_on_fins = colors.pattern == "stripes" and r.random() < 0.3
-        size = {"slender": r.uniform(1.0, 1.25), "torpedo": r.uniform(0.85, 1.1), "classic": r.uniform(0.7, 0.95),
-                "deep": r.uniform(0.75, 0.95), "round": r.uniform(0.55, 0.75)}[archetype]
+        length = {"slender": r.uniform(30, 90), "torpedo": r.uniform(20, 60), "classic": r.uniform(8, 30),
+                  "deep": r.uniform(10, 30), "round": r.uniform(8, 20)}[archetype]
 
         return cls(
             seed=seed,
@@ -241,7 +256,13 @@ class FishGenome:
             swim_amplitude=r.uniform(0.55, 0.75),
             wave_count=r.uniform(0.6, 1.0),
             colors=colors,
-            size=size,
+            length_cm=length,
+            silver=r.choice([0.0, 0.0, r.uniform(0.2, 0.6)]),
+            scales=r.uniform(0.018, 0.03),
+            mouth=r.uniform(0.025, 0.045),
+            mouth_height=r.uniform(-0.15, 0.1),
+            iris_color=r.choice(["#d8b45a", "#c8ccd0", "#d8a040", "#b8382c", "#e0d8b0"]),
+            fin_alpha=r.uniform(0.55, 0.85),
         )
 
     def to_dict(self) -> dict:
@@ -251,10 +272,13 @@ class FishGenome:
     def from_dict(cls, d: dict) -> "FishGenome":
         """Inverse of to_dict. Genes missing from older dicts keep their defaults."""
         d = dict(d)
+        known = {f for f in cls.__dataclass_fields__}
+        d = {k: v for k, v in d.items() if k in known}  # e.g. the old relative "size" gene
         for name in ("dorsal", "anal", "pelvic", "dorsal2"):
             if name in d:
                 d[name] = FinGenes(**d[name])
         for name, kind in (("colors", ColorGenes), ("wings", WingGenes), ("arms", ArmGenes), ("spines", SpineGenes)):
             if name in d:
-                d[name] = kind(**d[name])
+                sub = {k: v for k, v in d[name].items() if k in kind.__dataclass_fields__}
+                d[name] = kind(**sub)
         return cls(**d)

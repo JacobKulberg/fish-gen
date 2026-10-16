@@ -5,13 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "fishgen"
 version = "0.1.0"
-description = "Procedural pixel-art fish, sharks, whales, rays and more, with seamless swim and turn-around animations"
+description = "Procedural pixel-art fish, sharks, whales, rays and more, rendered from realistic 3D models, with seamless swim and turn-around animations"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Jacob Kulberg" }]
-keywords = ["pixel-art", "procedural-generation", "sprites", "gamedev", "godot", "fish", "animation"]
+keywords = ["procedural-generation", "pixel-art", "sprites", "gamedev", "godot", "fish", "animation"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Topic :: Games/Entertainment",
@@ -32,6 +32,17 @@ fishgen = "fishgen.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["fishgen*"]
+
+[tool.setuptools.package-data]
+fishgen = ["native/*.c"]
+
+# The renderer's hot loops in C. Optional: without a compiler the install still works and
+# fishgen compiles fast.c on first use, or falls back to numpy (see fishgen/native).
+[[tool.setuptools.ext-modules]]
+name = "fishgen._fast"
+sources = ["fishgen/native/fast.c"]
+define-macros = [["FISHGEN_PYMODULE", "1"]]
+optional = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

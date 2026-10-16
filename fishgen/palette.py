@@ -1,4 +1,5 @@
-"""Limited, hue-shifted pixel-art palette built from a fish's colour genes."""
+"""Key colours derived from an animal's colour genes: the renderer's base, belly, fin and pattern colours,
+the designer's colour swatches, and the palette summary written into the JSON."""
 
 from __future__ import annotations
 
