@@ -138,9 +138,12 @@ def export_sheet(sprite: FishSprite, out_dir: Path, stem: str, padding: int = 0)
             "loop": anim.loop,
             # Play this when a non-looping animation finishes (or to chain loops).
             "next": anim.next,
+            # yaw: the heading of this frame in radians (0 faces right); move the animal by
+            # cos(yaw) * speed so it slows into a turn and speeds out of it.
             "frames": [
-                {"x": x, "y": y, "w": fw, "h": fh, "duration_ms": anim.frame_ms}
-                for (x, y, fw, fh) in rects[name]
+                {"x": x, "y": y, "w": fw, "h": fh, "duration_ms": anim.frame_ms,
+                 "yaw": round(float(pose.yaw), 4)}
+                for (x, y, fw, fh), pose in zip(rects[name], anim.poses)
             ],
         }
     data = {"meta": meta, "animations": animations, "genome": sprite.genome.to_dict()}
