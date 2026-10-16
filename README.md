@@ -309,6 +309,9 @@ about half a second at 32 px and about two seconds at 128 px.
 pytest
 ```
 
+The pictures in this README are made by `python docs/make_images.py` (or just some of them:
+`python docs/make_images.py species scale`).
+
 ## License
 
 [MIT](LICENSE). Generated sprites are yours to use however you like, including in commercial games.
