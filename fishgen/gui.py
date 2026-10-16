@@ -23,9 +23,10 @@ from PIL import Image, ImageTk
 
 from .animation import SHOWCASE_ORDER, FishSprite, generate
 from .export import FORMATS, export_all
-from .genome import ALL_PATTERNS, ALL_TAIL_SHAPES, ARCHETYPES, EYE_STYLES, FIN_SHAPES, KINDS, WING_SHAPES, FishGenome
+from .genome import (ALL_FIN_SHAPES, ALL_PATTERNS, ALL_TAIL_SHAPES, ARCHETYPES, EYE_STYLES, KINDS, LOBE_SHAPES,
+                     PECTORAL_SHAPES, WING_SHAPES, FishGenome)
 from .kinds import kind_from_label, kind_label
-from .palette import ACCENT, BASE, FIN, build_palette
+from .palette import ACCENT, ACCENT2, BASE, FIN, build_palette
 from .species import RANDOM, kind_of, make_genome, species_for
 
 ANY = "Any"
@@ -47,11 +48,15 @@ SWIMMERS = ("fish", "shark", "whale", "ray", "squid", "octopus")
 FINNED = ("fish", "shark", "whale")
 GENE_TABS: list[tuple[str, list[tuple[str, tuple | None, list[tuple]]]]] = [
     ("Body", [
+        ("Size", None, [
+            ("Animal size", "size", "float", (0.3, 3.5)),
+        ]),
         ("Shape", None, [
             ("Body height", "height", "float", (0.06, 0.95)),
             ("Thickness", "thickness", "float", (0.3, 2.8)),
             ("Tallest point", "peak", "float", (0.2, 0.6)),
-            ("Nose bluntness", "nose", "float", (0.2, 1.2)),
+            ("Nose pointiness", "nose", "float", (0.2, 2.0)),
+            ("Flat head", "flat_head", "float", (0.0, 1.0)),
             ("Rear taper", "taper", "float", (0.4, 3.0)),
             ("Tail stem", "peduncle", "float", (0.08, 0.7)),
             ("Back arch", "back_arch", "float", (0.35, 0.75)),
@@ -62,6 +67,22 @@ GENE_TABS: list[tuple[str, list[tuple[str, tuple | None, list[tuple]]]]] = [
         ]),
         ("Dolphin head", ("whale",), [
             ("Beak", "beak", "float", (0.0, 0.15)),
+            ("Melon (forehead)", "melon", "float", (0.0, 0.08)),
+            ("Neck", "neck", "float", (0.0, 0.4)),
+            ("Throat grooves", "pleats", "bool", None),
+        ]),
+        ("Mouth", ("fish", "shark", "whale"), [
+            ("Mouth length", "mouth", "float", (0.0, 0.2)),
+            ("Mouth height", "mouth_height", "float", (-0.9, 0.5)),
+            ("Teeth", "teeth", "bool", None),
+        ]),
+        ("Head lobes", ("ray",), [
+            ("Lobes", "lobes", "choice", LOBE_SHAPES),
+            ("Lobe length", "lobe_length", "float", (0.0, 0.15)),
+        ]),
+        ("Puffing up", ("fish",), [
+            ("Puffed size", "puff", "float", (0.0, 1.2)),
+            ("Spikes", "puff_spines", "int", (0, 200)),
         ]),
         ("Eye", SWIMMERS, [
             ("Position", "eye_pos", "float", (0.02, 0.9)),
@@ -87,7 +108,7 @@ GENE_TABS: list[tuple[str, list[tuple[str, tuple | None, list[tuple]]]]] = [
         ]),
         ("Dorsal fin (top)", ("fish", "shark", "whale", "ray"), [
             ("Show", "dorsal.present", "bool", None),
-            ("Shape", "dorsal.shape", "choice", FIN_SHAPES),
+            ("Shape", "dorsal.shape", "choice", ALL_FIN_SHAPES),
             ("Starts at", "dorsal.start", "float", (0.1, 0.9)),
             ("Ends at", "dorsal.end", "float", (0.15, 1.0)),
             ("Height", "dorsal.height", "float", (0.02, 0.5)),
@@ -100,14 +121,16 @@ GENE_TABS: list[tuple[str, list[tuple[str, tuple | None, list[tuple]]]]] = [
         ]),
         ("Anal fin (bottom)", ("fish", "shark"), [
             ("Show", "anal.present", "bool", None),
-            ("Shape", "anal.shape", "choice", FIN_SHAPES),
+            ("Shape", "anal.shape", "choice", ALL_FIN_SHAPES),
             ("Starts at", "anal.start", "float", (0.1, 0.9)),
             ("Ends at", "anal.end", "float", (0.15, 1.0)),
             ("Height", "anal.height", "float", (0.02, 0.5)),
             ("Sweep back", "anal.sweep", "float", (0.0, 1.0)),
         ]),
         ("Side fins", FINNED, [
-            ("Pectoral size", "pectoral_size", "float", (0.05, 0.4)),
+            ("Pectoral size", "pectoral_size", "float", (0.05, 0.6)),
+            ("Pectoral shape", "pectoral_shape", "choice", PECTORAL_SHAPES),
+            ("Pectoral angle", "pectoral_droop", "float", (0.2, 1.6)),
             ("Fin flutter", "pectoral_flap", "float", (0.0, 1.0)),
             ("Pelvic fins", "pelvic.present", "bool", None),
             ("Pelvic position", "pelvic.start", "float", (0.2, 0.6)),
@@ -121,7 +144,7 @@ GENE_TABS: list[tuple[str, list[tuple[str, tuple | None, list[tuple]]]]] = [
             ("Starts at", "wings.start", "float", (0.0, 0.8)),
             ("Ends at", "wings.end", "float", (0.05, 1.0)),
             ("Span", "wings.span", "float", (0.02, 0.8)),
-            ("Tip sweep", "wings.sweep", "float", (0.0, 1.0)),
+            ("Tip sweep", "wings.sweep", "float", (0.0, 1.5)),
             ("Flap", "wings.flap", "float", (0.0, 1.0)),
             ("Ripple", "wings.wave", "float", (0.0, 2.5)),
         ]),
@@ -135,7 +158,7 @@ GENE_TABS: list[tuple[str, list[tuple[str, tuple | None, list[tuple]]]]] = [
             ("Writhe", "arms.curl", "float", (0.0, 1.0)),
         ]),
         ("Spines", ("urchin",), [
-            ("Spines", "spines.count", "int", (0, 160)),
+            ("Spines", "spines.count", "int", (0, 600)),
             ("Length", "spines.length", "float", (0.05, 1.2)),
             ("Sway", "spines.sway", "float", (0.0, 0.4)),
         ]),
@@ -154,6 +177,9 @@ GENE_TABS: list[tuple[str, list[tuple[str, tuple | None, list[tuple]]]]] = [
         ("Pattern", None, [
             ("Pattern", "colors.pattern", "choice", ALL_PATTERNS),
             ("Pattern colour", "colors.accent_color", "color", ACCENT),
+            ("Second colour", "colors.accent2_color", "color", ACCENT2),
+            ("Stripes on fins", "colors.pattern_on_fins", "bool", None),
+            ("Tail in body colour", "colors.tail_body_color", "bool", None),
             ("Hue shift (auto)", "colors.accent_hue_shift", "float", (-0.5, 0.5)),
             ("Density", "colors.pattern_scale", "float", (0.0, 1.0)),
             ("Offset", "colors.pattern_offset", "float", (0.0, 1.0)),
@@ -248,6 +274,7 @@ class FishStudio:
         self.turn_frames = tk.IntVar(value=10)
         self.fps = tk.DoubleVar(value=10.0)
         self.pitch = tk.DoubleVar(value=0.25)
+        self.scale_by_size = tk.BooleanVar(value=True)
         # Export
         self.name = tk.StringVar()
         self.out_dir = tk.StringVar(value=str(out.resolve()))
@@ -270,7 +297,7 @@ class FishStudio:
         self.kind.trace_add("write", lambda *_: self._kind_changed())
         for v in (self.species, self.archetype, self.seed):
             v.trace_add("write", lambda *_: self._type_changed())
-        for v in (self.width, self.height, self.swim_frames, self.turn_frames, self.fps, self.pitch):
+        for v in (self.width, self.height, self.swim_frames, self.turn_frames, self.fps, self.pitch, self.scale_by_size):
             v.trace_add("write", lambda *_: self.request_render())
         for v in (self.anim, self.zoom, self.background):
             v.trace_add("write", lambda *_: self.rebuild_frames())
@@ -467,6 +494,9 @@ class FishStudio:
         for n in (16, 24, 32, 48, 64, 96):
             ttk.Button(sizes, text=str(n), width=4,
                        command=lambda n=n: (self.width.set(n), self.height.set(n))).pack(side="left", padx=(0, 3))
+        ttk.Checkbutton(p, text="Scale canvas with animal size (sharks get bigger sprites)",
+                        variable=self.scale_by_size).grid(row=row + 3, column=0, columnspan=3, sticky="w", padx=8, pady=(4, 0))
+        row += 1
         row = self._section(p, row + 3, "Animation")
         self._int_row(p, row, "Swim frames", self.swim_frames, 2, 48, "per tail beat")
         self._int_row(p, row + 1, "Turn frames", self.turn_frames, 2, 64, "per turn-around")
@@ -515,8 +545,9 @@ class FishStudio:
         bar = ttk.Frame(parent, padding=(8, 8, 8, 4))
         bar.pack(fill="x")
         ttk.Label(bar, text="Animation").pack(side="left")
-        ttk.Combobox(bar, textvariable=self.anim, values=(SHOWCASE, *SHOWCASE_ORDER), state="readonly",
-                     width=20).pack(side="left", padx=(4, 12))
+        self.anim_box = ttk.Combobox(bar, textvariable=self.anim, values=(SHOWCASE, *SHOWCASE_ORDER[:1]),
+                                     state="readonly", width=20)
+        self.anim_box.pack(side="left", padx=(4, 12))
         ttk.Label(bar, text="Zoom").pack(side="left")
         ttk.Combobox(bar, textvariable=self.zoom, values=("Fit", *[f"{z}x" for z in (1, 2, 3, 4, 6, 8, 12, 16)]),
                      state="readonly", width=5).pack(side="left", padx=(4, 12))
@@ -651,7 +682,8 @@ class FishStudio:
         try:
             opts = dict(width=int(self.width.get()), height=int(self.height.get()),
                         swim_frames=int(self.swim_frames.get()), turn_frames=int(self.turn_frames.get()),
-                        fps=float(self.fps.get()), pitch=float(self.pitch.get()))
+                        fps=float(self.fps.get()), pitch=float(self.pitch.get()),
+                        scale_by_size=bool(self.scale_by_size.get()))
         except (tk.TclError, ValueError):
             raise ValueError("Sprite settings must be numbers")
         if not (8 <= opts["width"] <= 512 and 8 <= opts["height"] <= 512):
@@ -710,6 +742,10 @@ class FishStudio:
                     self.status.set(f"Render failed: {err}")
                 else:
                     self.sprite = sprite
+                    names = [n for n in SHOWCASE_ORDER if n in sprite.animations]
+                    self.anim_box.configure(values=(SHOWCASE, *names))
+                    if self.anim.get() not in (SHOWCASE, *names):
+                        self.anim.set(SHOWCASE)
                     w, h = sprite.size
                     busy = " (updating...)" if job_id < self._job else ""
                     self.status.set(f"{w}x{h} sprite, {sum(len(a.frames) for a in sprite.animations.values())} "

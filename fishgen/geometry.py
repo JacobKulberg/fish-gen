@@ -61,6 +61,7 @@ class Pose:
     turn_lag: float = 0.9  # how far the tail trails the head, as a fraction of the turn
     amplitude: float = 1.0  # multiplier on the swim wave
     pitch: float = 0.25  # camera tilt, radians (looking slightly down on the fish)
+    inflate: float = 0.0  # pufferfish: 0 = normal .. 1 = fully puffed up
 
 
 def turn_heading(progress: float, along, start: float, end: float, lag: float):
@@ -145,11 +146,24 @@ class FishModel:
         f_back = g.peduncle + (1.0 - g.peduncle) * np.cos(u_b * math.pi / 2) ** g.taper
         return np.maximum(np.where(front, f_front, f_back), 0.015)
 
+    def _neck(self, a):
+        """1, pinched in a little behind the head when the animal has a neck (belugas)."""
+        g = self.g
+        if g.neck <= 0:
+            return 1.0
+        return 1.0 - g.neck * np.exp(-((np.asarray(a, dtype=float) - 0.55 * g.peak) / 0.07) ** 2)
+
     def top(self, a):
-        return self.g.height * self.height_profile(a) * self.g.back_arch
+        g = self.g
+        t = g.height * self.height_profile(a) * g.back_arch * self._neck(a)
+        if g.melon > 0:  # bulging forehead just behind the beak
+            w = 0.05 + 0.5 * g.melon  # a big melon is a broad dome, a small one a gentle bump
+            m0 = max(g.beak, 0.02) + 0.6 * w
+            t = t + g.melon * np.exp(-((np.clip(np.asarray(a, dtype=float), 0.0, 1.0) - m0) / w) ** 2)
+        return t
 
     def bottom(self, a):
-        return self.g.height * self.height_profile(a) * (1.0 - self.g.back_arch)
+        return self.g.height * self.height_profile(a) * (1.0 - self.g.back_arch) * self._neck(a)
 
     def half_width(self, a):
         g = self.g
@@ -157,7 +171,38 @@ class FishModel:
         squeeze = 1.0 - 0.55 * np.clip((a - g.peak) / (1.0 - g.peak), 0, 1)
         if g.profile == "sphere":
             squeeze = 1.0
-        return 0.5 * g.height * g.thickness * self.height_profile(a) * squeeze
+        return 0.5 * g.height * g.thickness * self.height_profile(a) * squeeze * self._neck(a)
+
+    def _head_lift(self, a):
+        """Upward shift of the axis near the nose, so flat heads keep a level top line."""
+        g = self.g
+        a = np.clip(np.asarray(a, dtype=float), 0.0, 1.0)
+        lift = g.flat_head * (float(self.top(g.peak)) - self.top(a)) * 0.85
+        return np.where(a < g.peak, lift, 0.0)
+
+    def deform(self, p: np.ndarray, pose: Pose | None) -> np.ndarray:
+        """Rest-space shape changes applied before posing: flat heads, and a pufferfish puffing up."""
+        g = self.g
+        inflate = 0.0 if pose is None else pose.inflate
+        if not g.flat_head and not (g.puff and inflate > 0):
+            return p
+        p = p.copy()
+        a = np.clip(p[..., 0], 0.0, 1.0)
+        if g.puff and inflate > 0:
+            # Every cross-section swells towards a ball; fins ride out on the swelling surface.
+            k = inflate * np.clip((1.0 - a) / 0.2, 0.0, 1.0)
+            target = 0.5 * g.puff * np.sqrt(np.clip(1.0 - ((a - 0.47) / 0.56) ** 2, 0.02, 1.0))
+
+            def grow(c, surf):
+                surf = np.maximum(surf, 1e-4)
+                f = 1.0 + k * (np.maximum(target / surf, 1.0) - 1.0)
+                return np.where(np.abs(c) <= surf * 1.001, c * f, c + np.sign(c) * surf * (f - 1.0))
+
+            p[..., 1] = grow(p[..., 1], np.where(p[..., 1] >= 0, self.top(a), self.bottom(a)))
+            p[..., 2] = grow(p[..., 2], self.half_width(a))
+        if g.flat_head:
+            p[..., 1] += self._head_lift(a)
+        return p
 
     # ------------------------------------------------------------------ build
     def _build(self):
@@ -243,7 +288,7 @@ class FishModel:
             R, M = np.meshgrid(r, m, indexing="ij")
             va = ra[None, :] + (edge_a - ra)[None, :] * R
             vy = root_y[None, :] + (edge_y - root_y)[None, :] * R
-            add_grid(np.stack([va, vy, np.zeros_like(va)], -1), np.stack([M, R, np.zeros_like(R)], -1), part)
+            add_grid(np.stack([va, vy, np.zeros_like(va)], -1), np.stack([M, R, va], -1), part)
 
         median_fin(g.dorsal, DORSAL, 1.0)
         median_fin(g.dorsal2, DORSAL, 1.0)
@@ -265,35 +310,48 @@ class FishModel:
             M = np.broadcast_to(np.linspace(0, 1, n)[None, :], va.shape)
             zero = np.zeros_like(va)
             v = np.stack([va, zero, vy], -1) if flat else np.stack([va, vy, zero], -1)
-            add_grid(v, np.stack([M, np.broadcast_to(R, va.shape), zero], -1), CAUDAL)
+            add_grid(v, np.stack([M, np.broadcast_to(R, va.shape), va], -1), CAUDAL)
 
         # Paired fins hang off the flanks. Their shapes are stored in "fin space"
         # (u back along the body, v down) and placed per pose because they flap.
         self.paired: list[tuple[int, np.ndarray, np.ndarray, int]] = []
 
-        def paired_fin(part: int, side: float, root_a: float, root_y: float, length: float, droop: float, splay: float):
+        def paired_fin(part: int, side: float, root_a: float, root_y: float, length: float, droop: float, splay: float,
+                       blade: bool = False):
             m = np.linspace(0.0, 1.0, self.fin_cols // 2 + 2)
-            prof = np.sin(np.pi * m) ** 0.8
-            # Root: short segment along the body; edge: rounded lobe swept back.
-            ra = root_a + 0.04 * m
-            edge_u = 0.04 * m + length * (0.35 + 0.65 * prof) * (0.6 + 0.4 * m)
-            edge_v = droop * length * prof
+            if blade:
+                # Shark / whale fin: broad root, pointed tip swept down and back, hollow trailing edge.
+                root = 0.3 * length
+                prof = np.where(m < 0.3, (m / 0.3) ** 0.7, ((1.0 - m) / 0.7) ** 1.6)
+                edge_u = root * m + length * 0.8 * prof
+                edge_v = droop * length * prof
+                sink = 1.0
+            else:
+                # Root: short segment along the body; edge: rounded lobe swept back.
+                root = 0.04
+                prof = np.sin(np.pi * m) ** 0.8
+                edge_u = 0.04 * m + length * (0.35 + 0.65 * prof) * (0.6 + 0.4 * m)
+                edge_v = droop * length * prof
+                sink = 0.5
+            ra = root_a + root * m
             r = np.linspace(0.0, 1.0, self.fin_rows)
             R, M = np.meshgrid(r, m, indexing="ij")
-            fin_u = (0.04 * M) + (edge_u[None, :] - 0.04 * M) * R
+            fin_u = (root * M) + (edge_u[None, :] - root * M) * R
             fin_v = edge_v[None, :] * R
             rz = side * self.half_width(ra)[None, :] * 0.9 * np.ones_like(R)
             out = side * (splay + 0.6 * fin_v) * R * length
-            local = np.stack([root_a + fin_u, root_y - fin_v * 0.5, rz], -1)
+            local = np.stack([root_a + fin_u, root_y - fin_v * sink, rz], -1)
             self.paired.append((part, local.reshape(-1, 3), out.reshape(-1), count))
-            add_grid(local + np.stack([0 * R, 0 * R, out * 0.9], -1), np.stack([M, R, np.zeros_like(R)], -1), part)
+            add_grid(local + np.stack([0 * R, 0 * R, out * 0.9], -1), np.stack([M, R, local[..., 0]], -1), part)
 
+        blade = g.pectoral_shape == "blade"
         pect_a = min(g.eye_pos + 0.16, g.peak)
-        pect_y = -float(self.bottom(pect_a)) * 0.35
+        pect_y = -float(self.bottom(pect_a)) * (0.7 if blade else 0.35)
         pl = g.pectoral_size
         if pl > 0.01:
-            paired_fin(PECTORAL_NEAR, 1.0, pect_a, pect_y, pl, 0.45, 0.35)
-            paired_fin(PECTORAL_FAR, -1.0, pect_a, pect_y, pl, 0.45, 0.35)
+            droop, splay = (g.pectoral_droop, 0.12) if blade else (0.45, 0.35)
+            paired_fin(PECTORAL_NEAR, 1.0, pect_a, pect_y, pl, droop, splay, blade)
+            paired_fin(PECTORAL_FAR, -1.0, pect_a, pect_y, pl, droop, splay, blade)
         if g.pelvic.present:
             pa = g.pelvic.start
             py = -float(self.bottom(pa)) * 0.9
@@ -306,7 +364,7 @@ class FishModel:
         if g.wings.present:
             sheets.append((g.wings, True))
         if g.hammer > 0:
-            sheets.append((WingGenes(True, 0.0, 0.075, g.hammer, 0.45, "bar", 0.0, 0.0), False))
+            sheets.append((WingGenes(True, -0.01, 0.085, g.hammer, 0.45, "bar", 0.0, 0.0), False))
         for wing, flaps in sheets:
             for part, side in ((WING_NEAR, 1.0), (WING_FAR, -1.0)):
                 fn = self._wing_fn(wing, side)
@@ -317,6 +375,27 @@ class FishModel:
                     add_dynamic(fn, at, part, flip=side > 0)
                 else:
                     add_grid(v, at, part, flip=side > 0)
+
+        # Ray head lobes: manta "horns" (cephalic fins) or the cownose ray's rounded double snout.
+        if g.lobes != "none" and g.lobe_length > 0:
+            L = g.lobe_length
+            r = np.linspace(0.0, 1.0, 6)[:, None]
+            m = np.linspace(-1.0, 1.0, 5)[None, :]
+            a_root = 0.035
+            hw0 = float(self.half_width(a_root))
+            if g.lobes == "horns":
+                zc, wid = hw0 * 0.85 + 0.01 * r, 0.022 * (1.0 - 0.65 * r)
+            else:  # round: two plump lobes side by side under the snout
+                zc, wid = 0.5 * hw0 * np.ones_like(r), 0.5 * hw0 * np.sqrt(np.clip(1.0 - r ** 2, 0.04, 1.0))
+            a_c = a_root - (L + a_root) * r
+            y0 = float(self.top(a_root)) * 0.1
+            for part, side in ((WING_NEAR, 1.0), (WING_FAR, -1.0)):
+                A = np.broadcast_to(a_c, (6, 5))
+                v = np.stack([A, np.full(A.shape, y0), side * (zc + m * wid)], -1)
+                # Orient the sheet's normal the same way as the wings' (down in rest space).
+                nrm = np.cross(v[1, 2] - v[0, 2], v[0, 3] - v[0, 2])
+                at = np.stack([A, np.broadcast_to(r, A.shape), np.full(A.shape, side)], -1)
+                add_grid(v, at, part, flip=nrm[1] > 0)
 
         # Cephalopod arms: tubes trailing off the end of the body.
         for k in range(int(g.arms.count) + int(g.arms.tentacles)):
@@ -341,6 +420,17 @@ class FishModel:
             ez = float(self.half_width(ea)) * 0.92 + g.hammer * 0.95
         self.eyes = [] if g.eye_style == "none" else [Eye(ea, ey, ez, er), Eye(ea, ey, -ez, er)]
 
+        # Mouth: a short curve along each side of the head, (2 sides, n, 3).
+        if g.mouth > 0:
+            s_ = np.linspace(0.0, 1.0, 10)
+            ma = max(0.015, g.eye_pos - (0.03 if g.teeth else 0.07)) + g.mouth * s_
+            mv = np.clip(g.mouth_height + (0.22 if g.teeth else 0.08) * s_ ** 1.3, -0.95, 0.95)
+            my = np.where(mv > 0, self.top(ma), self.bottom(ma)) * mv
+            mz = self.half_width(ma) * np.sqrt(1.0 - mv ** 2) * 1.04
+            self.mouth = np.stack([np.stack([ma, my, side * mz], -1) for side in (1.0, -1.0)])
+        else:
+            self.mouth = np.zeros((0, 0, 3))
+
     # ------------------------------------------------------------------ extra parts
     _wing_r = np.linspace(0.0, 1.0, 7)
 
@@ -357,9 +447,14 @@ class FishModel:
             k = np.sqrt(np.clip(1.0 - np.clip((r - 0.7) / 0.3, 0, 1) ** 2, 0.0, 1.0))
             a_f = w.start + 0.3 * chord * r + 0.3 * chord * (1 - k)
             a_b = w.end - 0.1 * chord * r - 0.3 * chord * (1 - k)
-        else:  # pointed: convex leading edge, concave trailing edge
-            a_f = w.start + (tip - w.start) * r ** 1.4
-            a_b = w.end + (tip - w.end) * r ** 0.6
+        elif w.shape == "diamond":  # stingray: rhombic disc with softly rounded outer corners
+            k = 1.0 - np.clip((r - 0.8) / 0.2, 0, 1) ** 2 * 0.5
+            a_f = w.start + (tip - w.start) * r ** 0.9
+            a_b = w.end + (tip - w.end) * r ** 1.25
+            a_f, a_b = tip - (tip - a_f) * k, tip + (a_b - tip) * k
+        else:  # pointed: falcate - leading edge bowed forward, trailing edge hollowed into a crescent
+            a_f = w.start + (tip - w.start) * r ** 2.6
+            a_b = w.end + (tip - w.end) * r ** 1.6
         A = a_f[:, None] + (a_b - a_f)[:, None] * m[None, :]
         root_z = self.half_width(np.clip(A[0], 0.0, 1.0)) * 0.92
         dr = np.diff(r, prepend=0.0)[:, None]
@@ -369,7 +464,7 @@ class FishModel:
             amp = 0.0 if pose is None else pose.amplitude
             # The flap angle grows towards the tip so the wing curves; a wave can ripple along the chord.
             wave = np.sin(2 * math.pi * (phase - w.wave * m))[None, :]
-            ang = 1.1 * w.flap * amp * wave * (0.35 + 0.65 * r[:, None]) + 0.06
+            ang = 1.1 * w.flap * amp * wave * (0.35 + 0.65 * r[:, None]) + w.dihedral
             out = np.cumsum(w.span * dr * np.cos(ang), axis=0)
             up = np.cumsum(w.span * dr * np.sin(ang), axis=0)
             return np.stack([A, up, side * (root_z[None, :] + out)], -1), None
@@ -422,8 +517,10 @@ class FishModel:
 
         return fn, at
 
-    def _spine_lines(self, phase: float) -> np.ndarray:
-        """Urchin spines as rest-space segments (k, 2, 3): base and tip."""
+    def _spine_lines(self, phase: float, inflate: float = 0.0) -> np.ndarray:
+        """Urchin spines (or a puffed-up pufferfish's spikes) as rest-space segments (k, 2, 3): base and tip."""
+        if self.g.puff_spines:
+            return self._puff_spikes(inflate)
         sp = self.g.spines
         n = int(sp.count)
         if n <= 0:
@@ -446,6 +543,36 @@ class FishModel:
         lean = sp.sway * np.sin(2 * math.pi * phase + 2 * math.pi * (ca + 0.3 * cy))
         tip = base + (d + perp * lean[:, None]) * length[:, None]
         return np.stack([base, tip], 1)
+
+    def _puff_spikes(self, inflate: float) -> np.ndarray:
+        """Spikes all over a pufferfish, lying flat until it puffs up. Bases are on the rest
+        body (``posed`` moves them out with the skin); they stand up and lengthen as it swells."""
+        n = int(self.g.puff_spines)
+        if inflate <= 0.05:
+            return np.zeros((0, 2, 3))
+        rng = np.random.default_rng(self.g.seed + 7)
+        i = np.arange(n) + 0.5
+        cy = 1.0 - 2.0 * i / n
+        ring = np.sqrt(1.0 - cy ** 2)
+        ang = math.pi * (3.0 - math.sqrt(5.0)) * i + rng.uniform(-0.2, 0.2, n)
+        cx, cz = ring * np.cos(ang), ring * np.sin(ang)
+        ca = 0.06 + 0.84 * (0.5 + 0.5 * cx)
+        base = np.stack([ca, np.where(cy > 0, self.top(ca), self.bottom(ca)) * cy, self.half_width(ca) * cz], -1)
+        d = np.stack([cx * 0.7 + 0.25, cy, cz], -1)
+        d /= np.linalg.norm(d, axis=1, keepdims=True)
+        length = 0.16 * self.g.puff * inflate ** 1.5 * rng.uniform(0.8, 1.15, n)
+        return np.stack([base, base + d * length[:, None]], 1)
+
+    def mouth_lines(self, pose: Pose):
+        """Posed mouth curves in camera space plus, per side, whether it faces the camera."""
+        if not len(self.mouth):
+            return np.zeros((0, 0, 3)), np.zeros(0, dtype=bool)
+        spine = self.spine(pose)
+        centre = self.pose_points(np.array([[self.centre_a, 0.0, 0.0]]), pose, spine)[0]
+        pts = self.pose_points(self.deform(self.mouth, pose), pose, spine) - centre
+        out = self.pose_points(self.deform(self.mouth * np.array([1, 1, 1.5]), pose), pose, spine) - centre - pts
+        facing = _camera(out.mean(axis=1), pose.pitch)[:, 2] > 0
+        return _camera(pts, pose.pitch), facing
 
     # ------------------------------------------------------------------ posing
     def spine(self, pose: Pose):
@@ -516,6 +643,8 @@ class FishModel:
             if ax is not None:
                 axis_local[start:start + n] = ax.reshape(-1, 3)
 
+        verts = self.deform(verts, pose)
+        axis_local = self.deform(axis_local, pose)
         world = self.pose_points(verts, pose, spine)
 
         # Recentre on the body's midpoint so the sprite stays anchored.
@@ -534,12 +663,14 @@ class FishModel:
             normals[sl] *= np.where(flip == 0, 1.0, flip)
 
         eye_local = np.array([[e.a, e.y, e.z] for e in self.eyes]).reshape(-1, 3)
-        eye_world = self.pose_points(eye_local, pose, spine) - centre
-        eye_axis = self.pose_points(eye_local * np.array([1, 1, 1.5]), pose, spine) - centre - eye_world
+        eye_world = self.pose_points(self.deform(eye_local, pose), pose, spine) - centre
+        eye_axis = self.pose_points(self.deform(eye_local * np.array([1, 1, 1.5]), pose), pose, spine) - centre - eye_world
         eye_axis /= np.linalg.norm(eye_axis, axis=1, keepdims=True) + 1e-9
 
-        lines = self._spine_lines(pose.phase)
+        lines = self._spine_lines(pose.phase, pose.inflate)
         if len(lines):
+            if self.g.puff_spines:  # spikes ride out on the swelling skin, keeping their length
+                lines = lines + (self.deform(lines[:, 0], pose) - lines[:, 0])[:, None, :]
             lines = self.pose_points(lines, pose, spine) - centre
 
         return (
@@ -582,6 +713,10 @@ def _fin_profile(shape: str, m: np.ndarray) -> np.ndarray:
         return np.where(m < peak, m / peak, (1 - m) / (1 - peak)) ** 0.9
     if shape == "rounded":
         return np.sin(np.pi * m) ** 0.6
+    if shape == "falcate":  # sickle: tip high and back, trailing edge hollowed towards the tail
+        return np.where(m < 0.72, (m / 0.72) ** 0.75, ((1 - m) / 0.28) ** 2.2)
+    if shape == "pennant":  # angelfish streamer: rises the whole way to a tip right at the back
+        return np.where(m < 0.9, (m / 0.9) ** 0.8, ((1 - m) / 0.1) ** 1.5)
     if shape == "sail":
         return np.sin(np.pi * np.clip(m, 0, 1) ** 0.55) ** 0.7 * (0.6 + 0.6 * m)
     # long: low, even fin that runs the whole length

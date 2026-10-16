@@ -5,6 +5,9 @@ animation can hand off to the next one without a pop:
 
     swim_right -> turn_right_to_left -> swim_left -> turn_left_to_right -> swim_right
 
+Pufferfish also get ``puff_right`` / ``puff_left``: it swells into a spiky ball, holds,
+and deflates again, then carries on swimming the same way.
+
 The last frame of each animation flows into the first frame of the one it
 links to (see ``Animation.next``).
 """
@@ -67,13 +70,27 @@ def turn_poses(frames: int, swim_frames: int, start_yaw: float, end_yaw: float, 
     return poses
 
 
-SHOWCASE_ORDER = ("swim_right", "turn_right_to_left", "swim_left", "turn_left_to_right")
+def puff_poses(swim_frames: int, yaw: float, pitch: float, cycles: int = 3) -> list[Pose]:
+    """Puff up, hold the spiky ball, deflate. Lasts whole swim cycles so it hands back to the swim seamlessly."""
+    frames = swim_frames * cycles
+    poses = []
+    for j in range(frames):
+        t = j / frames
+        # Swell fast, hold, shrink back slowly (ends deflated, ready to swim on).
+        up, down = min(1.0, t / 0.22), min(1.0, max(0.0, (1.0 - t) / 0.3))
+        k = min(up, down)
+        k = k * k * (3 - 2 * k)
+        poses.append(Pose(phase=(j / swim_frames) % 1.0, yaw=yaw, pitch=pitch, inflate=k, amplitude=1.0 - 0.85 * k))
+    return poses
+
+
+SHOWCASE_ORDER = ("swim_right", "puff_right", "turn_right_to_left", "swim_left", "puff_left", "turn_left_to_right")
 
 
 def build_animations(swim_frames: int = 8, turn_frames: int = 10, fps: float = 10.0,
-                     pitch: float = 0.25, lag: float = 0.9) -> dict[str, Animation]:
+                     pitch: float = 0.25, lag: float = 0.9, puff: bool = False) -> dict[str, Animation]:
     right, left = 0.0, math.pi
-    return {
+    anims = {
         "swim_right": Animation("swim_right", swim_poses(swim_frames, right, pitch), fps, True, "swim_right"),
         "turn_right_to_left": Animation(
             "turn_right_to_left", turn_poses(turn_frames, swim_frames, right, left, pitch, lag), fps, False, "swim_left"),
@@ -81,6 +98,17 @@ def build_animations(swim_frames: int = 8, turn_frames: int = 10, fps: float = 1
         "turn_left_to_right": Animation(
             "turn_left_to_right", turn_poses(turn_frames, swim_frames, left, right, pitch, lag), fps, False, "swim_right"),
     }
+    if puff:
+        anims["puff_right"] = Animation("puff_right", puff_poses(swim_frames, right, pitch), fps, False, "swim_right")
+        anims["puff_left"] = Animation("puff_left", puff_poses(swim_frames, left, pitch), fps, False, "swim_left")
+    return anims
+
+
+def canvas_size(genome: FishGenome, width: int, height: int) -> tuple[int, int]:
+    """Sprite canvas for ``genome``: ``width`` x ``height`` is the canvas of an animal of size 1,
+    so bigger animals (sharks, whales) get bigger sprites and small fish smaller ones."""
+    k = genome.size
+    return (max(12, min(512, round(width * k))), max(12, min(512, round(height * k))))
 
 
 @dataclass
@@ -99,17 +127,24 @@ class FishSprite:
         """A seamless loop demonstrating everything: swim, turn, swim back, turn."""
         a = self.animations
         seq: list[np.ndarray] = []
-        for name in SHOWCASE_ORDER:
+        for name in [n for n in SHOWCASE_ORDER if n in a]:
             loops = swim_loops if a[name].loop else 1
             seq += (a[name].indexed if indexed else a[name].frames) * loops
         return seq
 
 
 def generate(seed: int, width: int = 32, height: int = 32, swim_frames: int = 8, turn_frames: int = 10,
-             fps: float = 10.0, pitch: float = 0.25, genome: FishGenome | None = None) -> FishSprite:
+             fps: float = 10.0, pitch: float = 0.25, genome: FishGenome | None = None,
+             scale_by_size: bool = True) -> FishSprite:
+    """Render every animation of a fish. ``width`` x ``height`` is the sprite size; with
+    ``scale_by_size`` that is the size for an animal of ``genome.size`` 1 and the canvas
+    grows or shrinks with the animal (see ``canvas_size``)."""
     genome = genome or FishGenome.random(seed)
+    if scale_by_size:
+        width, height = canvas_size(genome, width, height)
     # Some animals ask for a steeper camera (rays are seen from above) or a stiffer turn.
-    anims = build_animations(swim_frames, turn_frames, fps, pitch + genome.camera_tilt, genome.turn_lag)
+    anims = build_animations(swim_frames, turn_frames, fps, pitch + genome.camera_tilt, genome.turn_lag,
+                             puff=genome.puff > 0)
     all_poses = [p for a in anims.values() for p in a.poses]
     renderer = FishRenderer(genome, width, height, fit_poses=all_poses)
     for anim in anims.values():

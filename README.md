@@ -40,6 +40,15 @@ swim_right ──▶ turn_right_to_left ──▶ swim_left ──▶ turn_left_
 The turn is a 3/4 rotation: the fish swings its head towards the viewer, shows its face,
 and comes out facing the other way, with its body curving behind its head.
 
+Pufferfish get two more, `puff_right` and `puff_left`: the slim little fish swells into a
+spiky ball, holds it, and deflates back into its swim (both hand back to the matching swim loop).
+
+**Sizes.** Every animal has a size, and the sprite canvas scales with it: `--size` (default 32)
+is the canvas for a medium-sized fish, so a neon tetra comes out around 14px, a great white
+around 70px and a humpback around 90px - put them in one tank and the sharks are bigger than
+the fish. Pass `--fixed-size` (or untick *Scale canvas with animal size* in the designer) to
+render every animal at exactly `--size`.
+
 ## Gallery
 
 **24 random fish** (`fishgen generate --count 24`): no two alike.
@@ -102,6 +111,7 @@ fishgen                                         # opens the designer window
 fishgen generate --seed 42                      # all formats into ./out/fish_42/
 fishgen generate --species Clownfish --count 5  # five different clownfish
 fishgen generate --species "Tiger shark" --size 48
+fishgen generate --species Pufferfish           # includes the puff-up animations
 fishgen generate --kind ray --count 4           # four random rays: ./out/ray_<seed>/
 fishgen generate --count 20 --size 48 --out fish    # 20 fish, 48x48 sprites
 fishgen generate --seed 7 --size 64x32 --formats sheet,godot
@@ -118,7 +128,8 @@ fishgen preview --fish 5                        # live aquarium window
 | `--seed N` | random | same seed = same fish |
 | `--kind KIND` | fish | `fish`, `shark`, `whale`, `ray`, `squid`, `octopus` or `urchin`: a random animal of that kind |
 | `--species NAME` | random | preset (implies its kind; also works with `preview` and `gui`) |
-| `--size N` or `WxH` | `32` | sprite size in pixels |
+| `--size N` or `WxH` | `32` | sprite size in pixels for a medium-sized animal (bigger animals get bigger sprites) |
+| `--fixed-size` | off | use exactly `--size` for every animal |
 | `--swim-frames` | `8` | frames per swim cycle |
 | `--turn-frames` | `10` | frames per turn-around |
 | `--fps` | `10` | playback rate written into every format |
@@ -149,13 +160,14 @@ out/fish_42/
   frames/<anim>/       individual PNG frames
 ```
 
-All frames share the same canvas and the fish is always centred, so the sprite's pivot is
-the middle of the frame (`meta.pivot` in the JSON).
+All frames of one animal share the same canvas and the animal is always centred, so the
+sprite's pivot is the middle of the frame (`meta.pivot` in the JSON). Canvas sizes differ
+between animals unless you pass `--fixed-size`.
 
 ### Playing it in a game
 
-Non-looping animations (the turns) name the animation that follows them in `next`. Only
-start a turn when a swim loop **finishes** - that is the frame the turn was built to
+Non-looping animations (the turns, and a pufferfish's puffs) name the animation that follows
+them in `next`. Only start a turn or a puff when a swim loop **finishes** - that is the frame the turn was built to
 continue from, so the tail beat never skips. To move the fish, scale its speed by the
 facing of the current frame (the preview uses `cos(yaw)`), so it slows into the turn and
 speeds out of it.
@@ -177,8 +189,8 @@ func _on_loop():
         want_turn = false
         play("turn_right_to_left" if animation == "swim_right" else "turn_left_to_right")
 
-func _on_finished():  # turns don't loop
-    play("swim_left" if animation == "turn_right_to_left" else "swim_right")
+func _on_finished():  # turns and puffs don't loop
+    play("swim_left" if animation in ["turn_right_to_left", "puff_left"] else "swim_right")
 ```
 
 ## How it works

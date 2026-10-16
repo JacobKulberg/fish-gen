@@ -84,9 +84,9 @@ def _variant(r: random.Random, kind: str, variant: str | None, weights) -> str:
 def _shark(seed: int, r: random.Random, variant: str | None) -> FishGenome:
     v = _variant(r, "shark", variant, [5, 1])
     U = r.uniform
-    hammer = U(0.11, 0.15) if v == "hammerhead" else 0.0
-    d_start = U(0.3, 0.36)
-    tall = U(0.14, 0.2) if v == "requiem" else U(0.2, 0.26)
+    hammer = U(0.12, 0.15) if v == "hammerhead" else 0.0
+    d_start = U(0.33, 0.38)
+    tall = U(0.15, 0.21) if v == "requiem" else U(0.24, 0.3)
     blue = r.random() < 0.25
     hue = U(0.58, 0.64) if blue else r.choice([U(0.55, 0.62), U(0.08, 0.13)])
     sat = U(0.4, 0.65) if blue else U(0.08, 0.3)
@@ -95,20 +95,26 @@ def _shark(seed: int, r: random.Random, variant: str | None) -> FishGenome:
     accent = {"tiger": _hex(hue, sat + 0.1, val * 0.45), "spots": "#e6ebef", "none": None}[pattern]
     tips = r.random() < 0.2
     if tips:
-        accent = accent or "#16161a"
+        accent = accent or "#121216"
+    colors = _colors(hue, sat, val, 1.0, pattern, U(0.2, 0.9), U(0.0, 1.0), accent, _hex(hue, sat * 1.1, val * 0.88),
+                     0.4 if tips else 0.0)
+    colors.tail_body_color = True  # shark fins are skin, the same colour as the body
     return _base(
-        seed, "shark", height=U(0.23, 0.32), thickness=U(0.68, 0.85), peak=U(0.34, 0.42),
-        nose=1.0 if hammer else U(0.4, 1.0), taper=U(1.0, 1.25), peduncle=U(0.1, 0.16), back_arch=U(0.52, 0.58),
+        seed, "shark", height=U(0.23, 0.3), thickness=U(0.68, 0.85), peak=U(0.36, 0.42),
+        nose=1.0 if hammer else U(1.0, 1.5), taper=U(1.0, 1.25), peduncle=U(0.1, 0.16),
+        back_arch=0.62 if hammer else U(0.56, 0.62), flat_head=0.5 if hammer else U(0.15, 0.3),
         eye_pos=U(0.08, 0.12), eye_height=U(0.25, 0.4), eye_size=U(0.12, 0.2), eye_style="dark",
-        gill_slits=5, hammer=hammer,
+        gill_slits=5, hammer=hammer, mouth=U(0.08, 0.1), mouth_height=U(-0.7, -0.6), teeth=r.random() < 0.5,
         tail_shape="heterocercal", tail_length=U(0.26, 0.36), tail_spread=U(1.4, 1.9),
-        dorsal=FinGenes(True, d_start, d_start + U(0.13, 0.17), tall, "triangle", U(0.5, 0.8)),
+        dorsal=FinGenes(True, d_start, d_start + U(0.13, 0.17), tall, "falcate" if hammer else "triangle", U(0.5, 0.8)),
         dorsal2=FinGenes(True, U(0.72, 0.76), 0.81, U(0.035, 0.06), "triangle", 0.5),
         anal=FinGenes(True, U(0.75, 0.78), 0.84, U(0.03, 0.05), "triangle", 0.5),
         pelvic=FinGenes(True, U(0.56, 0.6), 0.65, U(0.05, 0.07), "triangle", 0.5),
-        pectoral_size=U(0.18, 0.26), pectoral_flap=U(0.1, 0.2),
+        pectoral_size=U(0.26, 0.33), pectoral_flap=U(0.1, 0.2), pectoral_shape="blade", pectoral_droop=U(0.9, 1.15),
         swim_amplitude=U(0.4, 0.5), wave_count=U(0.65, 0.8),
-        colors=_colors(hue, sat, val, 1.0, pattern, U(0.2, 0.9), U(0.0, 1.0), accent, None, 0.3 if tips else 0.0),
+        size=U(1.7, 2.1) if hammer else U(1.5, 2.0),
+        camera_tilt=0.3 if hammer else 0.0,  # look down a little more so the hammer reads as a T
+        colors=colors,
     )
 
 
@@ -119,8 +125,10 @@ def _whale(seed: int, r: random.Random, variant: str | None) -> FishGenome:
     dolphin = v == "dolphin"
     if r.random() < 0.9:
         d_start = U(0.38, 0.6) if not dolphin else U(0.4, 0.5)
+        shape = r.choice(["falcate", "falcate", "triangle"]) if dolphin else \
+            r.choice(["falcate", "triangle", "rounded", "sail"])
         dorsal = FinGenes(True, d_start, d_start + U(0.06, 0.14), U(0.08, 0.16) if dolphin else U(0.04, 0.3),
-                          r.choice(["triangle", "triangle", "rounded", "sail"]), U(0.15, 0.9))
+                          shape, U(0.5, 0.9) if shape == "falcate" else U(0.15, 0.9))
     else:
         dorsal = _off()
     long_flippers = not dolphin and r.random() < 0.25
@@ -134,8 +142,10 @@ def _whale(seed: int, r: random.Random, variant: str | None) -> FishGenome:
     # Dark animals keep dark flippers, though some (humpback-like) have pale ones.
     fin = (_hex(hue, 0.05, 0.85) if r.random() < 0.25 else _hex(hue, 0.1, val * 0.85)) if val < 0.3 else None
     return _base(
-        seed, "whale", height=U(0.22, 0.26) if dolphin else U(0.26, 0.32), thickness=U(0.75, 0.85),
-        peak=U(0.36, 0.42), nose=U(0.5, 0.65) if dolphin else U(0.7, 1.0), beak=U(0.05, 0.09) if dolphin else 0.0,
+        seed, "whale", height=U(0.2, 0.26) if dolphin else U(0.26, 0.32), thickness=U(0.75, 0.85),
+        peak=U(0.36, 0.42), nose=U(0.5, 0.65) if dolphin else U(0.7, 1.0), beak=U(0.07, 0.11) if dolphin else 0.0,
+        melon=U(0.0, 0.015) if dolphin else 0.0, flat_head=0.0 if dolphin else U(0.0, 0.4),
+        pectoral_shape="blade", pectoral_droop=U(0.6, 0.8), size=U(1.5, 1.9) if dolphin else U(2.2, 2.9),
         taper=U(1.2, 1.4), peduncle=U(0.1, 0.14), back_arch=0.5,
         eye_pos=U(0.1, 0.14), eye_height=U(-0.1, 0.2), eye_size=U(0.12, 0.16), eye_style="dark",
         swim_vertical=True, tail_shape="flukes", tail_length=U(0.18, 0.24), tail_spread=U(1.1, 1.6),
@@ -151,21 +161,29 @@ def _ray(seed: int, r: random.Random, variant: str | None) -> FishGenome:
     v = _variant(r, "ray", variant, [3, 2])
     U = r.uniform
     if v == "eagle":
-        wings = WingGenes(True, U(0.03, 0.09), U(0.38, 0.44), U(0.38, 0.62), U(0.6, 0.8), "pointed",
+        # The head sticks out ahead of falcate wings whose tips sweep back past the wing root.
+        wings = WingGenes(True, U(0.08, 0.12), U(0.38, 0.44), U(0.4, 0.6), U(1.2, 1.35), "pointed",
                           U(0.75, 0.9), U(0.1, 0.25))
         dorsal = FinGenes(True, 0.45, 0.5, 0.04, "triangle", 0.6) if r.random() < 0.5 else _off()
+        head = dict(nose=U(0.45, 0.7), thickness=U(1.5, 1.9))
+        lobes = r.choice([("none", 0.0), ("round", U(0.03, 0.05))])
     else:
-        wings = WingGenes(True, U(0.01, 0.04), U(0.46, 0.54), U(0.18, 0.24), U(0.4, 0.5), "round",
+        # The disc takes in the head: round, or a diamond with angled corners.
+        shape = r.choice(["round", "diamond"])
+        wings = WingGenes(True, U(0.0, 0.03), U(0.46, 0.54), U(0.2, 0.26), U(0.42, 0.5), shape,
                           U(0.25, 0.35), U(1.1, 1.5))
         dorsal = _off()
+        head = dict(nose=U(0.6, 0.9), thickness=U(2.2, 2.6))
+        lobes = ("none", 0.0)
     hue = r.choice([U(0.06, 0.12), U(0.58, 0.64)])
     sat, val = U(0.15, 0.55), U(0.2, 0.68)
     pattern = r.choices(["none", "spots"], weights=[3, 1.5])[0]
     accent = ("#eef0f0" if val < 0.4 else r.choice(["#2f8ae0", _hex(hue, sat + 0.2, val * 0.4)])) \
         if pattern == "spots" else None
     return _base(
-        seed, "ray", height=U(0.08, 0.1), thickness=U(2.2, 2.6), peak=U(0.2, 0.24), nose=U(0.5, 1.0),
-        taper=U(2.0, 3.0), peduncle=U(0.3, 0.38), back_arch=0.6,
+        seed, "ray", height=U(0.08, 0.1), peak=U(0.2, 0.24), **head, lobes=lobes[0], lobe_length=lobes[1],
+        taper=U(6.0, 8.0), peduncle=U(0.18, 0.24), back_arch=0.6,  # thin whip tail straight out of the disc
+        size=U(1.2, 1.7) if v == "eagle" else U(0.9, 1.3),
         eye_pos=U(0.08, 0.12), eye_height=0.75, eye_size=0.25, eye_style="dark",
         wings=wings, dorsal=dorsal, swim_amplitude=U(0.06, 0.1), wave_count=U(1.2, 1.5),  # stiff body: rays swim with their wings
         camera_tilt=U(0.85, 0.95), turn_lag=0.5,  # near top-down, so both wings flap alike
@@ -179,21 +197,33 @@ def _squid(seed: int, r: random.Random, variant: str | None) -> FishGenome:
     U = r.uniform
     hue = r.choice([U(-0.05, 0.02), U(0.05, 0.1)])
     sat, val = U(0.3, 0.7), U(0.55, 0.88)
+    accent2 = None
     if v == "squid":
-        shape = dict(height=U(0.18, 0.24), thickness=0.9, nose=U(0.35, 0.45), peak=0.4, eye_pos=0.76)
-        wings = WingGenes(True, 0.0, U(0.2, 0.3), U(0.08, 0.12), 0.5, "pointed", 0.4, 0.6)
+        shape = dict(height=U(0.18, 0.24), thickness=0.9, nose=U(0.35, 0.45), peak=0.4, eye_pos=0.76,
+                     size=U(0.9, 1.2))
+        # Big arrowhead fins on the tip of the mantle.
+        wings = WingGenes(True, 0.0, U(0.28, 0.36), U(0.15, 0.19), 0.55, "pointed", 0.4, 0.6, dihedral=0.45)
         arms = ArmGenes(8, U(0.4, 0.6), U(0.028, 0.034), 2, U(0.7, 1.1), U(0.4, 0.55), U(0.25, 0.35))
-        pattern = r.choices(["none", "spots"], weights=[1, 2])[0]
+        pattern = r.choices(["none", "spots", "shimmer"], weights=[1, 2, 0.7])[0]
+        accent = _hex(hue, sat + 0.2, val * 0.55) if pattern != "none" else None
     else:
-        shape = dict(height=U(0.27, 0.32), thickness=U(1.1, 1.2), nose=U(0.8, 0.9), peak=0.4, eye_pos=0.74)
-        wings = WingGenes(True, 0.03, U(0.65, 0.72), U(0.04, 0.05), 0.5, "round", 0.7, 2.0)
-        arms = ArmGenes(8, U(0.2, 0.26), 0.03, 0, 1.0, 0.15, 0.3)
-        pattern = r.choices(["none", "tiger", "spots"], weights=[1, 2, 1])[0]
-    accent = _hex(hue, sat + 0.2, val * 0.55) if pattern != "none" else None
+        # Cuttlefish: a broad mantle ringed by a rippling fin skirt, a fat crown of arms, and
+        # iridescent colour waves rolling over the skin.
+        shape = dict(height=U(0.36, 0.4), thickness=U(1.15, 1.25), nose=U(0.8, 0.9), peak=0.42, eye_pos=0.72,
+                     size=U(0.8, 1.0))
+        wings = WingGenes(True, 0.03, U(0.65, 0.72), U(0.06, 0.07), 0.5, "round", 0.7, 2.0)
+        arms = ArmGenes(8, U(0.45, 0.55), U(0.05, 0.058), 2, U(0.6, 0.75), U(0.32, 0.4), U(0.35, 0.45))
+        hue = r.choice([U(0.75, 0.85), U(0.88, 0.96), U(0.45, 0.52), U(0.05, 0.1)])
+        sat, val = U(0.4, 0.6), U(0.7, 0.9)
+        pattern = r.choices(["shimmer", "tiger", "spots"], weights=[4, 1, 1])[0]
+        accent = _hex(hue + r.choice([0.25, 0.35, -0.3]), U(0.5, 0.8), U(0.85, 1.0))
+        accent2 = _hex(hue + r.choice([-0.15, 0.5, 0.6]), U(0.45, 0.75), U(0.85, 1.0))
+    colors = _colors(hue, sat, val, U(0.3, 0.5), pattern, U(0.2, 1.0), U(0.0, 1.0), accent)
+    colors.accent2_color = accent2
     return _base(
         seed, "squid", taper=1.0, peduncle=0.55, back_arch=0.5, eye_height=0.25, eye_size=0.3,
         swim_amplitude=0.2, wave_count=0.8, pulse=U(0.1, 0.14), wings=wings, arms=arms,
-        colors=_colors(hue, sat, val, U(0.3, 0.5), pattern, U(0.2, 1.0), U(0.0, 1.0), accent), **shape,
+        colors=colors, **shape,
     )
 
 
@@ -201,7 +231,7 @@ def _squid(seed: int, r: random.Random, variant: str | None) -> FishGenome:
 def _octopus(seed: int, r: random.Random, variant: str | None) -> FishGenome:
     v = _variant(r, "octopus", variant, [5, 1])
     U = r.uniform
-    hue = r.choice([U(0.0, 0.1), U(0.94, 0.99), U(0.1, 0.14)])
+    hue = r.choice([U(0.0, 0.1), U(0.94, 0.99), U(0.1, 0.14), U(0.8, 0.9)])
     sat, val = U(0.35, 0.65), U(0.55, 0.88)
     if v == "octopus":
         shape = dict(height=U(0.6, 0.75), thickness=0.85, peak=0.32, taper=1.6, peduncle=0.32, eye_pos=0.68)
@@ -216,6 +246,7 @@ def _octopus(seed: int, r: random.Random, variant: str | None) -> FishGenome:
     accent = {"rings": "#2e6bff", "spots": _hex(hue, sat + 0.2, val * 0.55), "none": None}[pattern]
     return _base(
         seed, "octopus", nose=1.0, back_arch=0.5, eye_height=0.25, eye_size=0.22,
+        size=U(0.85, 1.15) if v == "octopus" else U(0.6, 0.8),
         swim_amplitude=0.2, wave_count=0.8, pulse=pulse, wings=wings, arms=arms,
         colors=_colors(hue, sat, val, U(0.3, 0.45), pattern, U(0.4, 0.8), U(0.0, 1.0), accent), **shape,
     )
@@ -226,16 +257,18 @@ def _urchin(seed: int, r: random.Random, variant: str | None) -> FishGenome:
     v = _variant(r, "urchin", variant, [4, 1])
     U = r.uniform
     hue, sat, val = r.choice([(U(0.77, 0.85), U(0.4, 0.6), U(0.35, 0.5)), (U(0.0, 0.04), U(0.5, 0.65), U(0.4, 0.55)),
-                              (U(0.22, 0.3), U(0.4, 0.55), U(0.4, 0.5)), (U(0.65, 0.75), U(0.1, 0.25), U(0.12, 0.18))])
+                              (U(0.22, 0.3), U(0.4, 0.55), U(0.4, 0.5)), (U(0.65, 0.75), U(0.1, 0.25), U(0.12, 0.18)),
+                              (U(0.05, 0.09), U(0.65, 0.8), U(0.55, 0.7)), (U(0.9, 0.96), U(0.4, 0.55), U(0.5, 0.65))])
     if v == "long":
-        spines = SpineGenes(r.randint(40, 60), U(0.75, 1.0), U(0.08, 0.14))
+        spines = SpineGenes(r.randint(160, 240), U(0.75, 1.0), U(0.08, 0.14))
     else:
-        spines = SpineGenes(r.randint(25, 120), 0.0, U(0.06, 0.15))
-        spines.length = 0.2 + 0.3 * (1 - (spines.count - 25) / 95) + U(-0.03, 0.03)  # fewer spines, longer
+        spines = SpineGenes(r.randint(220, 420), 0.0, U(0.06, 0.15))
+        spines.length = 0.2 + 0.25 * (1 - (spines.count - 220) / 200) + U(-0.03, 0.03)  # fewer spines, longer
     spine = _hex(hue, sat + 0.05, min(1.0, val * 1.6 + 0.05))
     return _base(
         seed, "urchin", profile="sphere", height=U(0.7, 0.8), thickness=1.0 / 0.75, back_arch=0.55,
         eye_style="none", swim_amplitude=0.0, wave_count=0.0, turn_lag=0.0, camera_tilt=0.25, spines=spines,
+        size=U(0.55, 0.75),
         colors=_colors(hue, sat, val, 0.0, fin=spine),
     )
 
@@ -265,7 +298,7 @@ def individualise(g: FishGenome, salt: str) -> FishGenome:
 
     g.height *= U(0.86, 1.14)
     g.thickness *= U(0.9, 1.1)
-    g.nose = clip(g.nose + U(-0.15, 0.15), 0.3, 1.0)
+    g.nose = clip(g.nose * U(0.88, 1.12), 0.3, 2.0)
     g.peduncle *= U(0.88, 1.12)
     g.eye_size *= U(0.85, 1.15)
     if g.kind in ("fish", "shark", "whale"):
@@ -282,7 +315,7 @@ def individualise(g: FishGenome, salt: str) -> FishGenome:
             g.dorsal.sweep = clip(g.dorsal.sweep + U(-0.15, 0.15), 0.0, 1.0)
     if g.wings.present:
         g.wings.span *= U(0.85, 1.15)
-        g.wings.sweep = clip(g.wings.sweep + U(-0.07, 0.07), 0.0, 1.0)
+        g.wings.sweep = clip(g.wings.sweep + U(-0.07, 0.07), 0.0, 1.5)
         g.wings.flap *= U(0.9, 1.1)
     if g.arms.count:
         g.arms.length *= U(0.8, 1.2)
@@ -292,7 +325,7 @@ def individualise(g: FishGenome, salt: str) -> FishGenome:
         g.arms.tentacle_length *= U(0.85, 1.2)
         g.pulse *= U(0.8, 1.2)
     if g.spines.count:
-        g.spines.count = max(8, round(g.spines.count * U(0.8, 1.25)))
+        g.spines.count = max(8, round(g.spines.count * U(0.85, 1.2)))
         g.spines.length *= U(0.85, 1.15)
     c = g.colors
     c.hue = (c.hue + U(-0.035, 0.035)) % 1.0

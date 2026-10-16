@@ -66,6 +66,8 @@ class TankFish:
                 elif self._wants_turn(bounds):
                     self.anim = "turn_right_to_left" if self.anim == "swim_right" else "turn_left_to_right"
                     self.turn_queued = False
+                elif "puff_right" in self.sprite.animations and self.rng.random() < 0.12:
+                    self.anim = "puff_right" if self.anim == "swim_right" else "puff_left"
                 anim = self.sprite.animations[self.anim]
         # Velocity follows where the fish is actually facing, so it slows into the
         # turn, stops while facing the viewer and accelerates out the other way.
@@ -92,7 +94,8 @@ class TankFish:
 
 class Preview:
     def __init__(self, seed: int, size, count: int, zoom: int, swim_frames: int, turn_frames: int,
-                 fps: float, pitch: float, out: Path, species: str | None = None, kind: str | None = None):
+                 fps: float, pitch: float, out: Path, species: str | None = None, kind: str | None = None,
+                 scale_by_size: bool = True):
         pygame.init()
         pygame.display.set_caption("fishgen preview")
         self.screen = pygame.display.set_mode((1100, 650), pygame.RESIZABLE)
@@ -102,7 +105,8 @@ class Preview:
         self.size = size
         self.count = count
         self.zoom = zoom
-        self.opts = dict(swim_frames=swim_frames, turn_frames=turn_frames, fps=fps, pitch=pitch)
+        self.opts = dict(swim_frames=swim_frames, turn_frames=turn_frames, fps=fps, pitch=pitch,
+                         scale_by_size=scale_by_size)
         self.out = out
         self.species = species
         self.kind = kind
@@ -197,7 +201,7 @@ class Preview:
         panel.fill((0, 0, 0, 170))
         self.screen.blit(panel, (0, 0))
         y = 50
-        for name in SHOWCASE_ORDER:
+        for name in [n for n in SHOWCASE_ORDER if n in f.sprite.animations]:
             anim = f.sprite.animations[name]
             label = self.font.render(f"{name}  ({len(anim.frames)}f @ {anim.fps:g}fps -> {anim.next})", True, (230, 230, 230))
             self.screen.blit(label, (20, y))
@@ -261,5 +265,5 @@ class Preview:
 
 def run(seed: int, size=(32, 32), count: int = 1, zoom: int = 4, swim_frames: int = 8, turn_frames: int = 10,
         fps: float = 10.0, pitch: float = 0.25, out: Path = Path("out"), species: str | None = None,
-        kind: str | None = None):
-    Preview(seed, size, count, zoom, swim_frames, turn_frames, fps, pitch, out, species, kind).run()
+        kind: str | None = None, scale_by_size: bool = True):
+    Preview(seed, size, count, zoom, swim_frames, turn_frames, fps, pitch, out, species, kind, scale_by_size).run()

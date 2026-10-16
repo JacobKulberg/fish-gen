@@ -20,10 +20,11 @@ FIN = 6
 FIN_DARK = 7
 ACCENT = 8
 EYE = 9
+ACCENT2 = 10
 
 SLOT_NAMES = (
     "transparent", "outline", "shadow", "base", "highlight",
-    "belly", "fin", "fin_dark", "accent", "eye",
+    "belly", "fin", "fin_dark", "accent", "eye", "accent2",
 )
 
 
@@ -101,5 +102,10 @@ def build_palette(g: ColorGenes) -> Palette:
     else:
         accent = _rgb(ah, min(1.0, s + 0.1), min(1.0, v + 0.05))
 
+    if g.accent2_color:
+        accent2 = hex_rgb(g.accent2_color)
+    else:
+        accent2 = _rgb(h + 0.33, min(1.0, s + 0.2), min(1.0, v + 0.15))
+
     eye = (245, 245, 235)
-    return Palette([(0, 0, 0), outline, shadow, base, highlight, belly, fin, fin_dark, accent, eye])
+    return Palette([(0, 0, 0), outline, shadow, base, highlight, belly, fin, fin_dark, accent, eye, accent2])
