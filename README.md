@@ -65,9 +65,11 @@ silhouette (`--no-outline` to drop it). `--style smooth` keeps the full-colour r
 **Sizes.** Every sprite is 64x64 unless you say otherwise: `--size 16` (or `32`, `96`, `128`,
 `48x32`...) fits the animal into that canvas. With `--to-scale`, animals are drawn **to scale**
 instead: each carries its real adult length
-(`length_cm`, varying from one individual to the next; rays are measured across the wings,
-urchins across the shell) at `--px-per-m` pixels to the metre - 16 by default, so a 4.7 m
-great white is about 75 px long. Small fish are still drawn at least `--min-px` (16) long, and
+(`length_cm`; rays are measured across the wings, urchins across the shell) at `--px-per-m`
+pixels to the metre - 16 by default, so a 4.5 m great white is about 72 px long. Lengths come
+from a size database (`fishgen/sizes.py`) of every species' measured adult range, with its
+source: each individual is drawn from that range, so most are near the typical size and a few
+are runts or giants, and orca and sperm whale bulls are bigger than cows. Small fish are still drawn at least `--min-px` (16) long, and
 the biggest whales are shrunk to fit a `--max-px` (128) sprite, and each canvas is just big
 enough for its animal.
 

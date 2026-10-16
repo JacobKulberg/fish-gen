@@ -125,6 +125,11 @@ def pixelate(frames: list[np.ndarray], colors: int | None = None, outline: bool 
     stack = np.stack(frames)
     solid = stack[..., 3] >= alpha_cut * 255
     solid = np.stack([_tidy_mask(m) for m in solid])
+    for k, m in enumerate(solid):
+        if not m.any():  # an animal only a pixel or two across: keep its most solid pixels
+            a = stack[k, ..., 3]
+            if a.max() > 0:
+                solid[k] = a >= a.max() * 0.6
 
     lab_img = _see_through(to_oklab(stack[..., :3]), stack[..., 3] / 255.0)
     with ThreadPoolExecutor(min(8, os.cpu_count() or 1)) as ex:  # numpy runs these outside the GIL

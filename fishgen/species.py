@@ -5,9 +5,9 @@ or a shark / ray / ... of a given variant) and then pins the genes that make the
 species itself. The seed still varies everything a preset leaves alone, so
 "Goldfish, seed 3" and "Goldfish, seed 4" are recognisably goldfish but not identical.
 
-Every preset carries the species' real adult length (``length_cm``; disc width for rays,
-shell diameter for urchins), so animals drawn to scale come out the right size next to
-each other. Some species come in colour varieties (``morphs``): the seed picks one, e.g.
+Every preset's real adult length (``length_cm``; disc width for rays, shell diameter for
+urchins) comes from the size database in sizes.py: each individual is drawn from its species'
+measured adult range, so animals drawn to scale come out the right size next to each other. Some species come in colour varieties (``morphs``): the seed picks one, e.g.
 a koi is a Kohaku, Sanke, Showa, Ogon or Chagoi.
 """
 
@@ -17,6 +17,7 @@ import random
 
 from .genome import FinGenes, FishGenome
 from .kinds import individualise, random_genome
+from .sizes import SIZES
 
 RANDOM = "Random"
 
@@ -37,7 +38,7 @@ def C(hue, saturation, value, belly=1.0, pattern="none", scale=0.5, offset=0.0, 
 # take a dict of their own fields. "morphs" is a list of (variety, weight, overrides).
 FISH: dict[str, tuple[str, dict]] = {
     "Goldfish": ("round", dict(
-        length_cm=20, tail_shape="fan", tail_length=0.36, tail_spread=1.25, peduncle=0.28,
+        tail_shape="fan", tail_length=0.36, tail_spread=1.25, peduncle=0.28,
         scales=0.035, silver=0.35, gloss=0.5, fin_alpha=0.6, iris_color="#d8a850",
         dorsal=dict(present=True, shape="rounded", height=0.14), anal=dict(shape="rounded"),
         colors=C(0.07, 0.85, 0.95, belly=0.45),
@@ -53,7 +54,7 @@ FISH: dict[str, tuple[str, dict]] = {
     )),
     "Clownfish": ("classic", dict(
         # Three white bars edged in black, black-rimmed fins, a rounded tail.
-        length_cm=9, height=0.44, peak=0.36, nose=0.5, taper=1.0, peduncle=0.32, tail_shape="rounded",
+        height=0.44, peak=0.36, nose=0.5, taper=1.0, peduncle=0.32, tail_shape="rounded",
         tail_length=0.24, eye_size=0.27, scales=0.025, fin_alpha=0.92, pectoral_size=0.18,
         iris_color="#e8a020", gloss=0.45,
         dorsal=dict(present=True, shape="rounded", start=0.25, end=0.75, height=0.12),
@@ -69,7 +70,7 @@ FISH: dict[str, tuple[str, dict]] = {
         # A tall flat disc with a pointed snout; dorsal and anal fins sweep up and back into
         # long streamers, thread-like pelvic fins, and black bars (one through the eye) that
         # run on across the fins.
-        length_cm=15, height=0.62, thickness=0.35, peak=0.38, nose=0.85, taper=0.9, peduncle=0.22,
+        height=0.62, thickness=0.35, peak=0.38, nose=0.85, taper=0.9, peduncle=0.22,
         eye_pos=0.13, eye_size=0.22, eye_height=0.3, tail_shape="lunate", tail_length=0.3, tail_spread=1.25,
         scales=0.02, silver=0.45, fin_alpha=0.55, iris_color="#c83a2a",
         dorsal=dict(present=True, shape="pennant", start=0.3, end=0.66, height=0.48, sweep=0.95),
@@ -88,7 +89,7 @@ FISH: dict[str, tuple[str, dict]] = {
     "Tuna": ("torpedo", dict(
         # Yellowfin: deep-chested torpedo, metallic blue-black back, silver flanks, a yellow
         # flank stripe, long yellow second dorsal and anal sickles, yellow finlets.
-        length_cm=150, height=0.3, thickness=0.75, nose=0.5, peduncle=0.07, eye_size=0.14, eye_height=0.3,
+        height=0.3, thickness=0.75, nose=0.5, peduncle=0.07, eye_size=0.14, eye_height=0.3,
         tail_shape="lunate", tail_length=0.28, tail_spread=1.7, finlets=8, silver=0.75, scales=0.012,
         fin_alpha=0.95, gloss=0.6, iris_color="#c0c4c8",
         dorsal=dict(present=True, shape="triangle", start=0.3, end=0.45, height=0.1),
@@ -100,7 +101,7 @@ FISH: dict[str, tuple[str, dict]] = {
     "Eel": ("slender", dict(
         # European eel: one long, unbroken, slimy body; the dorsal and anal fins run on round the
         # tip of the tail.
-        length_cm=70, height=0.1, peak=0.3, nose=0.6, taper=1.7, peduncle=0.05, tail_shape="none",
+        height=0.1, peak=0.3, nose=0.6, taper=1.7, peduncle=0.05, tail_shape="none",
         scales=0.0, gloss=0.7, fin_alpha=0.75, iris_color="#c8b070",
         dorsal=dict(present=True, shape="long", start=0.32, end=1.0, height=0.04, sweep=0.1),
         anal=dict(present=True, shape="long", start=0.55, end=1.0, height=0.035, sweep=0.1),
@@ -109,7 +110,7 @@ FISH: dict[str, tuple[str, dict]] = {
     )),
     "Pufferfish": ("classic", dict(
         # Small and slim when calm; see the puff_right / puff_left animations for the spiky ball.
-        length_cm=25, height=0.38, thickness=0.75, nose=0.7, peak=0.4, tail_shape="rounded", tail_length=0.18,
+        height=0.38, thickness=0.75, nose=0.7, peak=0.4, tail_shape="rounded", tail_length=0.18,
         tail_spread=0.8, eye_size=0.32, eye_height=0.45, eye_pos=0.14, scales=0.0, gloss=0.35, fin_alpha=0.6,
         iris_color="#58b0a0",
         dorsal=dict(present=True, shape="rounded", start=0.68, end=0.8, height=0.08),
@@ -120,7 +121,7 @@ FISH: dict[str, tuple[str, dict]] = {
     "Betta": ("classic", dict(
         # Siamese fighting fish: huge, flowing fins that fold and ripple like cloth (billow), a
         # halfmoon tail as tall as the fish is long, and a deep anal fin draping back under it.
-        length_cm=6.5, height=0.3, tail_shape="fan", tail_length=0.55, tail_spread=2.6, scales=0.03,
+        height=0.3, tail_shape="fan", tail_length=0.55, tail_spread=2.6, scales=0.03,
         silver=0.25, fin_alpha=0.85, tail_alpha=0.88, iris_color="#3a2020", billow=1.0,
         swim_amplitude=0.25, mouth=0.03, mouth_height=0.1,
         dorsal=dict(present=True, shape="sail", start=0.55, end=0.93, height=0.26, sweep=1.0),
@@ -141,7 +142,7 @@ FISH: dict[str, tuple[str, dict]] = {
         # Electric blue stripe from the eye to the tail over a red lower rear half; see-through fins.
         # The real tail is nearly clear, which vanishes in pixel art, so it is drawn a bit bigger and
         # more solid than life (its own alpha) to keep the forked tail readable at 16-32 px.
-        length_cm=3.5, height=0.28, tail_shape="forked", tail_length=0.3, tail_spread=1.6, eye_size=0.34,
+        height=0.28, tail_shape="forked", tail_length=0.3, tail_spread=1.6, eye_size=0.34,
         scales=0.03, fin_alpha=0.3, tail_alpha=0.8, iris_color="#b8c8d8",
         dorsal=dict(present=True, shape="triangle", start=0.42, end=0.54, height=0.08, sweep=0.5),
         anal=dict(present=True, shape="long", start=0.6, end=0.85, height=0.06),
@@ -149,7 +150,7 @@ FISH: dict[str, tuple[str, dict]] = {
                  accent2="#e8283c", fin="#c7d2dc", tail="#9aa8b8"),
     )),
     "Koi": ("torpedo", dict(
-        length_cm=60, height=0.3, tail_shape="rounded", pectoral_size=0.18, scales=0.03, silver=0.15,
+        height=0.3, tail_shape="rounded", pectoral_size=0.18, scales=0.03, silver=0.15,
         fin_alpha=0.7, iris_color="#d0c8b8", mouth=0.04, mouth_height=-0.2,
         colors=C(0.1, 0.06, 0.95, belly=0.3, pattern="koi", scale=0.45, accent="#e24a1e", fin="#f2ece4"),
         morphs=[
@@ -164,7 +165,7 @@ FISH: dict[str, tuple[str, dict]] = {
         ],
     )),
     "Discus": ("round", dict(
-        length_cm=18, height=0.85, nose=0.9, peak=0.5, tail_shape="truncate", tail_length=0.16, scales=0.015,
+        height=0.85, nose=0.9, peak=0.5, tail_shape="truncate", tail_length=0.16, scales=0.015,
         fin_alpha=0.75, iris_color="#d02820",
         dorsal=dict(present=True, shape="long", start=0.25, end=0.92, height=0.1),
         anal=dict(present=True, shape="long", start=0.45, end=0.92, height=0.1),
@@ -179,7 +180,7 @@ FISH: dict[str, tuple[str, dict]] = {
     "Mackerel": ("slender", dict(
         # Long and skinny: a small spiny first dorsal, a smaller second dorsal near the tail, a
         # neat forked tail, wavy dark bars over a steel-blue back, and mirror-silver flanks.
-        length_cm=35, height=0.19, thickness=0.7, nose=0.75, peak=0.38, taper=1.1, peduncle=0.08,
+        height=0.19, thickness=0.7, nose=0.75, peak=0.38, taper=1.1, peduncle=0.08,
         tail_shape="forked", tail_length=0.18, tail_spread=1.25, eye_size=0.24, eye_height=0.3, finlets=5,
         silver=0.65, scales=0.008, fin_alpha=0.7, gloss=0.6, iris_color="#c8ccd0",
         dorsal=dict(present=True, shape="triangle", start=0.28, end=0.4, height=0.07, sweep=0.5),
@@ -191,13 +192,13 @@ FISH: dict[str, tuple[str, dict]] = {
     )),
     "Piranha": ("deep", dict(
         # Red-bellied piranha: sparkly silver-grey flanks, red throat and belly, a jaw of teeth.
-        length_cm=28, height=0.55, nose=0.7, tail_shape="truncate", eye_size=0.22, scales=0.012,
+        height=0.55, nose=0.7, tail_shape="truncate", eye_size=0.22, scales=0.012,
         silver=0.5, fin_alpha=0.8, iris_color="#c83020", mouth=0.06, mouth_height=-0.35, teeth=True,
         colors=C(0.58, 0.12, 0.55, belly=0.0, pattern="red_belly", accent="#c83a28", fin="#3a3f4a"),
     )),
     "Yellow tang": ("deep", dict(
         # A bright yellow disc with a long pointed snout.
-        length_cm=18, height=0.62, thickness=0.35, peak=0.45, nose=1.35, taper=1.0, peduncle=0.16,
+        height=0.62, thickness=0.35, peak=0.45, nose=1.35, taper=1.0, peduncle=0.16,
         eye_pos=0.18, eye_height=0.35, eye_size=0.2, tail_shape="truncate", tail_length=0.2, tail_spread=1.0,
         scales=0.008, fin_alpha=0.85, iris_color="#2a2a2a", mouth=0.025, mouth_height=0.0,
         dorsal=dict(present=True, shape="long", start=0.25, end=0.92, height=0.16),
@@ -207,7 +208,7 @@ FISH: dict[str, tuple[str, dict]] = {
     )),
     "Blue tang": ("deep", dict(
         # Regal blue tang: royal blue with the black "palette" marking and a yellow tail.
-        length_cm=25, height=0.52, thickness=0.35, peak=0.42, nose=0.8, peduncle=0.14, eye_pos=0.14,
+        height=0.52, thickness=0.35, peak=0.42, nose=0.8, peduncle=0.14, eye_pos=0.14,
         eye_size=0.22, tail_shape="truncate", tail_length=0.22, tail_spread=1.2, scales=0.008, fin_alpha=0.9,
         iris_color="#202020", mouth=0.025, mouth_height=0.0,
         dorsal=dict(present=True, shape="long", start=0.22, end=0.92, height=0.12),
@@ -217,7 +218,7 @@ FISH: dict[str, tuple[str, dict]] = {
     )),
     "Rainbow trout": ("torpedo", dict(
         # Olive back, a pink band along the flank, black speckles over the back and fins.
-        length_cm=50, height=0.25, thickness=0.65, nose=0.7, peduncle=0.12, eye_size=0.18, scales=0.008,
+        height=0.25, thickness=0.65, nose=0.7, peduncle=0.12, eye_size=0.18, scales=0.008,
         silver=0.4, fin_alpha=0.85, iris_color="#c8b880", mouth=0.07, mouth_height=-0.15,
         tail_shape="truncate", tail_length=0.2, tail_spread=1.2,
         dorsal=dict(present=True, shape="rounded", start=0.38, end=0.5, height=0.09),
@@ -228,7 +229,7 @@ FISH: dict[str, tuple[str, dict]] = {
     )),
     "Atlantic salmon": ("torpedo", dict(
         # Bright sea-run salmon: mirror-silver with a blue-green back and small black X spots.
-        length_cm=75, height=0.24, thickness=0.65, nose=0.75, peduncle=0.09, eye_size=0.16, scales=0.008,
+        height=0.24, thickness=0.65, nose=0.75, peduncle=0.09, eye_size=0.16, scales=0.008,
         silver=0.75, fin_alpha=0.8, gloss=0.55, iris_color="#c8ccd0", mouth=0.07, mouth_height=-0.15,
         tail_shape="truncate", tail_length=0.2, tail_spread=1.3,
         dorsal=dict(present=True, shape="triangle", start=0.38, end=0.5, height=0.09),
@@ -239,7 +240,7 @@ FISH: dict[str, tuple[str, dict]] = {
     )),
     "Great barracuda": ("slender", dict(
         # Long silver torpedo with an underslung jaw full of fangs, dark bars and black blotches.
-        length_cm=130, height=0.15, thickness=0.75, nose=1.4, peak=0.45, taper=1.1, peduncle=0.09,
+        height=0.15, thickness=0.75, nose=1.4, peak=0.45, taper=1.1, peduncle=0.09,
         flat_head=0.4, eye_size=0.26, eye_pos=0.12, eye_height=0.35, scales=0.008, silver=0.65,
         fin_alpha=0.85, gloss=0.6, iris_color="#d8d0b0", mouth=0.14, mouth_height=-0.3, teeth=True, scariness=0.75,
         tail_shape="forked", tail_length=0.2, tail_spread=1.6,
@@ -253,7 +254,7 @@ FISH: dict[str, tuple[str, dict]] = {
     "Ocean sunfish": ("round", dict(
         # Mola: a huge upright disc that ends in a scalloped "clavus" instead of a tail, with
         # tall dorsal and anal fins it sculls from side to side, and thick mottled skin.
-        length_cm=200, height=0.9, thickness=0.32, peak=0.4, nose=0.5, taper=0.8, peduncle=0.55,
+        height=0.9, thickness=0.32, peak=0.4, nose=0.5, taper=0.8, peduncle=0.55,
         eye_pos=0.16, eye_size=0.1, eye_height=0.25, tail_shape="rounded", tail_length=0.1, tail_spread=0.62,
         scales=0.0, fin_alpha=1.0, gloss=0.2, iris_color="#303030", mouth=0.02, mouth_height=0.0,
         swim_amplitude=0.12, pectoral_size=0.1,
@@ -271,7 +272,7 @@ FISH: dict[str, tuple[str, dict]] = {
 OTHERS: dict[str, tuple[str, str, dict]] = {
     # ------------------------------------------------------------------ sharks
     "Tiger shark": ("shark", "requiem", dict(
-        nose=0.95, height=0.28, tail_length=0.34, teeth=True, scariness=0.7, length_cm=400, scars=0.4,
+        nose=0.95, height=0.28, tail_length=0.34, teeth=True, scariness=0.7, scars=0.4,
         colors=C(0.1, 0.25, 0.58, pattern="tiger", scale=0.3, accent="#3b352c", fin="#857a68", tail_body=True),
     )),
     "Great white shark": ("shark", "requiem", dict(
@@ -281,12 +282,11 @@ OTHERS: dict[str, tuple[str, str, dict]] = {
         tail_shape="lunate",
         dorsal=dict(start=0.39, end=0.55, height=0.24, shape="triangle", sweep=0.55),
         pectoral_size=0.34, pectoral_droop=0.75, mouth=0.13, mouth_height=-0.62, teeth=True, scariness=0.9,
-        length_cm=450,
         scars=0.7,
         colors=C(0.57, 0.14, 0.4, belly_level=-0.12, fin="#5f6770", tail_body=True),
     )),
     "Hammerhead shark": ("shark", "hammerhead", dict(
-        hammer=0.14, height=0.25, eye_size=0.2, length_cm=400, teeth=True, scariness=0.35,
+        hammer=0.14, height=0.25, eye_size=0.2, teeth=True, scariness=0.35,
         dorsal=dict(height=0.3, shape="falcate", sweep=0.6),
         colors=C(0.12, 0.15, 0.6, fin="#8f8a7c", tail_body=True),
     )),
@@ -297,7 +297,7 @@ OTHERS: dict[str, tuple[str, str, dict]] = {
         eye_pos=0.07, eye_size=0.09, eye_height=-0.15, mouth=0.06, mouth_height=-0.15, teeth=False, scariness=0.0,
         tail_length=0.38, tail_spread=1.9, pectoral_size=0.32, swim_amplitude=0.3, tail_shape="lunate",
         dorsal=dict(start=0.5, end=0.66, height=0.15, shape="triangle", sweep=0.6),
-        dorsal2=dict(start=0.8, height=0.05), length_cm=1000, scars=0.5,
+        dorsal2=dict(start=0.8, height=0.05), scars=0.5,
         colors=C(0.6, 0.4, 0.4, belly=0.9, belly_level=-0.3, pattern="whale_shark", scale=0.4, offset=0.3,
                  accent="#eef3f6", accent2="#a7bccc", fin="#4a5a70", tail_body=True),
     )),
@@ -306,17 +306,17 @@ OTHERS: dict[str, tuple[str, str, dict]] = {
         height=0.22, nose=1.75, flat_head=0.1, peduncle=0.08, tail_spread=1.8, eye_size=0.2, teeth=True,
         scariness=0.8,
         tail_shape="lunate",
-        length_cm=300, gloss=0.45, colors=C(0.62, 0.65, 0.5, fin="#3a4f9a", tail_body=True),
+        gloss=0.45, colors=C(0.62, 0.65, 0.5, fin="#3a4f9a", tail_body=True),
     )),
     "Blacktip reef shark": ("shark", "requiem", dict(
-        height=0.25, nose=1.3, length_cm=150, teeth=True, scariness=0.4,
+        height=0.25, nose=1.3, teeth=True, scariness=0.4,
         dorsal=dict(height=0.19, shape="triangle"),
         colors=C(0.1, 0.15, 0.72, fin_tips=0.45, accent="#0b0b0e", fin="#a39d8f", tail_body=True),
     )),
     "Blue shark": ("shark", "requiem", dict(
         # Slender and graceful, with very long scythe pectorals, a long snout and a vivid blue back.
         height=0.2, nose=1.6, flat_head=0.1, peduncle=0.09, tail_spread=1.6, tail_length=0.38, eye_size=0.24,
-        pectoral_size=0.29, pectoral_droop=0.85, length_cm=280, gloss=0.45, teeth=False, scariness=0.0,
+        pectoral_size=0.29, pectoral_droop=0.85, gloss=0.45, teeth=False, scariness=0.0,
         dorsal=dict(start=0.42, end=0.54, height=0.15, shape="triangle", sweep=0.6),
         colors=C(0.62, 0.72, 0.62, belly_level=-0.1, fin="#3a5ab8", tail_body=True),
     )),
@@ -324,7 +324,7 @@ OTHERS: dict[str, tuple[str, str, dict]] = {
         # Sluggish bottom-dweller: broad flat head, tiny eyes, two rounded dorsals set far back
         # and a long tail with hardly any lower lobe.
         height=0.22, thickness=1.05, nose=0.45, flat_head=0.8, peak=0.3, back_arch=0.55, eye_size=0.1,
-        tail_length=0.42, tail_spread=1.1, pectoral_size=0.24, pectoral_droop=0.7, length_cm=250, gloss=0.2,
+        tail_length=0.42, tail_spread=1.1, pectoral_size=0.24, pectoral_droop=0.7, gloss=0.2,
         teeth=False, scariness=0.0, mouth=0.04, mouth_height=-0.5,
         dorsal=dict(start=0.52, end=0.64, height=0.12, shape="rounded", sweep=0.3),
         dorsal2=dict(start=0.7, height=0.09),
@@ -334,18 +334,18 @@ OTHERS: dict[str, tuple[str, str, dict]] = {
     "Orca": ("whale", "whale", dict(
         # The dorsal fin is set per individual: a tall straight male blade or a curved female sickle.
         height=0.3, nose=0.8, flat_head=0.0, eye_pos=0.1, eye_height=0.2, pectoral_size=0.2, pectoral_droop=0.6,
-        length_cm=700, gloss=0.75, scars=0.25,
+        gloss=0.75, scars=0.25,
         colors=C(0.62, 0.1, 0.06, belly=0.0, pattern="orca", accent="#f2f2ee", fin="#121318",
                  accent2="#7d828c"),
     )),
     "Bottlenose dolphin": ("whale", "dolphin", dict(
-        beak=0.12, eye_pos=0.19, height=0.21, nose=0.6, melon=0.012, length_cm=300, gloss=0.7, scars=0.25,
+        beak=0.12, eye_pos=0.19, height=0.21, nose=0.6, melon=0.012, gloss=0.7, scars=0.25,
         dorsal=dict(present=True, shape="falcate", start=0.42, end=0.56, height=0.13, sweep=0.75),
         colors=C(0.58, 0.12, 0.55, belly=0.8),
     )),
     "Common dolphin": ("whale", "dolphin", dict(
         # The tan-and-grey hourglass on each flank under a dark cape.
-        beak=0.09, eye_pos=0.16, height=0.2, nose=0.55, length_cm=220, gloss=0.7,
+        beak=0.09, eye_pos=0.16, height=0.2, nose=0.55, gloss=0.7,
         dorsal=dict(present=True, shape="falcate", start=0.42, end=0.55, height=0.14, sweep=0.8),
         colors=C(0.62, 0.3, 0.2, belly_level=-0.4, pattern="dolphin_cape", scale=0.6, accent="#c8b07a",
                  accent2="#8a9098", fin="#20262f"),
@@ -354,7 +354,7 @@ OTHERS: dict[str, tuple[str, str, dict]] = {
         # Big round echolocation melon over a short beak, a flexible neck, no dorsal fin.
         height=0.3, nose=0.5, peak=0.5, beak=0.03, melon=0.085, neck=0.3, flat_head=0.0, back_arch=0.45,
         eye_pos=0.15, eye_height=0.0, dorsal=dict(present=False), tail_length=0.18,
-        pectoral_size=0.15, pectoral_shape="lobe", mouth=0.05, mouth_height=-0.3, length_cm=450, gloss=0.5,
+        pectoral_size=0.15, pectoral_shape="lobe", mouth=0.05, mouth_height=-0.3, gloss=0.5,
         scars=0.35,
         colors=C(0.12, 0.06, 0.93, belly=0.4),
     )),
@@ -362,7 +362,7 @@ OTHERS: dict[str, tuple[str, str, dict]] = {
         # Long, thin flat head studded with knobs, enormous white flippers, throat grooves,
         # barnacles, dark above with a mottled white belly.
         height=0.26, nose=0.75, peak=0.42, flat_head=0.75, back_arch=0.55, pectoral_size=0.55,
-        pectoral_droop=0.42, eye_pos=0.2, eye_height=-0.35, tail_spread=1.7, pleats=True, length_cm=1400,
+        pectoral_droop=0.42, eye_pos=0.2, eye_height=-0.35, tail_spread=1.7, pleats=True,
         knobs=1.0, scars=0.4, gloss=0.45,
         dorsal=dict(present=True, shape="rounded", start=0.6, end=0.66, height=0.04, sweep=0.5),
         colors=C(0.6, 0.12, 0.25, belly=0.9, belly_level=-0.5, pattern="humpback", accent="#d8dce0",
@@ -372,7 +372,7 @@ OTHERS: dict[str, tuple[str, str, dict]] = {
         # A huge square head a third of the body long, a narrow underslung jaw, wrinkled
         # dark-grey skin scarred by squid, a low hump instead of a dorsal fin, small paddle flippers.
         height=0.25, nose=0.12, peak=0.3, flat_head=1.0, back_arch=0.55, taper=1.4, eye_pos=0.3,
-        eye_height=-0.4, pectoral_size=0.1, mouth=0.22, mouth_height=-0.85, length_cm=1150, gloss=0.35,
+        eye_height=-0.4, pectoral_size=0.1, mouth=0.22, mouth_height=-0.85, gloss=0.35,
         scars=1.0, tail_spread=1.5,
         dorsal=dict(present=True, shape="rounded", start=0.62, end=0.72, height=0.035, sweep=0.4),
         colors=C(0.08, 0.12, 0.25, belly=0.15),
@@ -380,7 +380,7 @@ OTHERS: dict[str, tuple[str, str, dict]] = {
     # ------------------------------------------------------------------ rays
     "Cownose ray": ("ray", "eagle", dict(
         # Blunt, squared-off head with the two rounded lobes of the "cow nose" under it.
-        nose=0.3, thickness=1.8, lobes="round", lobe_length=0.045, length_cm=90,
+        nose=0.3, thickness=1.8, lobes="round", lobe_length=0.045,
         wings=dict(start=0.1, end=0.36, span=0.4, sweep=1.25, flap=0.85, wave=0.2),
         dorsal=dict(present=True, shape="triangle", start=0.45, end=0.5, height=0.04, sweep=0.6),
         colors=C(0.08, 0.5, 0.5),
@@ -389,7 +389,7 @@ OTHERS: dict[str, tuple[str, str, dict]] = {
         # Huge swept-back wings, a broad squared front with the two cephalic fins either side
         # of a wide mouth, a short tail.
         nose=0.3, thickness=2.4, height=0.2, peak=0.3, taper=3.0, peduncle=0.1, lobes="horns",
-        lobe_length=0.11, length_cm=350, eye_pos=0.07, eye_height=0.1, eye_size=0.16, mouth=0.04,
+        lobe_length=0.11, eye_pos=0.07, eye_height=0.1, eye_size=0.16, mouth=0.04,
         mouth_height=-0.15, scars=0.3,
         wings=dict(start=0.05, end=0.6, span=0.85, sweep=1.15, flap=0.75, wave=0.15),
         colors=C(0.6, 0.15, 0.1, belly=1.0, pattern="chevron", accent="#e8ecec", belly_pattern=True),
@@ -401,37 +401,37 @@ OTHERS: dict[str, tuple[str, str, dict]] = {
     "Spotted eagle ray": ("ray", "eagle", dict(
         # A rounded duck-bill head jutting out in front of the wings, white spots on an inky
         # back, and a whip tail longer than the body.
-        nose=0.55, thickness=1.5, lobes="none", lobe_length=0.0, length_cm=200,
+        nose=0.55, thickness=1.5, lobes="none", lobe_length=0.0,
         wings=dict(start=0.06, end=0.27, span=0.34, sweep=1.25, flap=0.85, wave=0.2),
         colors=C(0.62, 0.3, 0.16, pattern="spots", scale=1.0, offset=0.1, accent="#eef0f0"),
     )),
     "Stingray": ("ray", "stingray", dict(
         # Southern stingray: a wide diamond disc that takes in the head, rippling as it swims,
         # with eyes on top and a long whip tail.
-        nose=0.85, length_cm=100,
+        nose=0.85,
         wings=dict(start=0.0, end=0.5, span=0.28, sweep=0.45, shape="diamond", flap=0.16, wave=1.3),
         colors=C(0.09, 0.3, 0.42),
     )),
     "Bluespotted stingray": ("ray", "stingray", dict(
         # Bluespotted ribbontail: a small oval disc, rounded snout, electric blue spots.
-        nose=0.6, length_cm=25,
+        nose=0.6,
         wings=dict(start=0.0, end=0.48, span=0.2, sweep=0.45, shape="round", flap=0.16, wave=1.3),
         colors=C(0.11, 0.5, 0.68, pattern="spots", scale=0.4, offset=0.6, accent="#2f8ae0"),
     )),
     # ------------------------------------------------------------------ squid & cuttlefish
     "Squid": ("squid", "squid", dict(
-        length_cm=40, height=0.22, arms=dict(length=0.45, tentacle_length=0.75),
+        height=0.22, arms=dict(length=0.45, tentacle_length=0.75),
         colors=C(0.97, 0.35, 0.85, belly=0.5, pattern="spots", scale=1.0, accent="#b0384a"),
     )),
     "Giant squid": ("squid", "squid", dict(
-        length_cm=1000, height=0.18, wings=dict(end=0.22, span=0.12, dihedral=0.35),
+        height=0.18, wings=dict(end=0.22, span=0.12, dihedral=0.35),
         arms=dict(length=0.55, tentacle_length=1.0, thickness=0.028),
         colors=C(0.0, 0.7, 0.55, belly=0.3),
     )),
     "Cuttlefish": ("squid", "cuttlefish", dict(
         # Iridescent: rose-violet skin with teal and gold colour waves rolling down it.
-        length_cm=40, colors=C(0.86, 0.45, 0.82, belly=0.5, pattern="shimmer", scale=0.4,
-                               accent="#4ce6d2", accent2="#ffc35a"),
+        colors=C(0.86, 0.45, 0.82, belly=0.5, pattern="shimmer", scale=0.4,
+                 accent="#4ce6d2", accent2="#ffc35a"),
         morphs=[
             ("Rose", 2, {}),
             ("Zebra", 1, dict(colors=dict(hue=0.08, saturation=0.3, value=0.75, pattern="tiger",
@@ -440,39 +440,39 @@ OTHERS: dict[str, tuple[str, str, dict]] = {
     )),
     # ------------------------------------------------------------------ octopus
     "Octopus": ("octopus", "octopus", dict(
-        length_cm=90, height=0.7, arms=dict(length=1.3, thickness=0.05, spread=0.75, curl=0.6),
+        height=0.7, arms=dict(length=1.3, thickness=0.05, spread=0.75, curl=0.6),
         colors=C(0.03, 0.6, 0.6, belly=0.45, pattern="blotches", scale=0.7, accent="#7a2a1c",
                  accent2="#e8b090"),
     )),
     "Blue-ringed octopus": ("octopus", "octopus", dict(
-        length_cm=15, height=0.65, arms=dict(length=1.1, thickness=0.045, spread=0.7, curl=0.55),
+        height=0.65, arms=dict(length=1.1, thickness=0.045, spread=0.7, curl=0.55),
         colors=C(0.12, 0.6, 0.82, belly=0.3, pattern="rings", scale=0.4, accent="#2e6bff",
                  accent_edge="#141010"),
     )),
     "Dumbo octopus": ("octopus", "dumbo", dict(
-        length_cm=25, colors=C(0.97, 0.35, 0.88, belly=0.4),
+        colors=C(0.97, 0.35, 0.88, belly=0.4),
     )),
     # ------------------------------------------------------------------ urchins
     "Purple sea urchin": ("urchin", "short", dict(
         # Strongylocentrotus purpuratus: a dense coat of stout purple spines.
-        length_cm=7, spines=dict(count=100, length=0.38, sway=0.1, taper=0.8),
+        spines=dict(count=100, length=0.38, sway=0.1, taper=0.8),
         colors=C(0.8, 0.55, 0.38, belly=0.0, fin="#8a4bb0"),
     )),
     "Long-spined urchin": ("urchin", "long", dict(
         # Diadema: needle-thin black spines longer than the shell is wide, iridescent blue spots
         # on the shell and an orange-rimmed anal cone on top.
-        length_cm=9, spines=dict(count=70, length=0.95, sway=0.12, taper=0.95),
+        spines=dict(count=70, length=0.95, sway=0.12, taper=0.95),
         colors=C(0.7, 0.2, 0.12, belly=0.0, fin="#25222e", pattern="spots", scale=0.35, accent="#3d8be0",
                  accent2="#e07a2a"),
     )),
     "Red pencil urchin": ("urchin", "short", dict(
         # Heterocidaris / Heterocentrotus: a few thick, blunt, red pencil spines.
-        length_cm=8, spines=dict(count=34, length=0.5, sway=0.05, taper=0.2),
+        spines=dict(count=34, length=0.5, sway=0.05, taper=0.2),
         colors=C(0.01, 0.6, 0.4, belly=0.0, fin="#d0533a"),
     )),
     "Green sea urchin": ("urchin", "short", dict(
         # Strongylocentrotus droebachiensis: short, fine, crowded green spines.
-        length_cm=6, spines=dict(count=130, length=0.26, sway=0.1, taper=0.75),
+        spines=dict(count=130, length=0.26, sway=0.1, taper=0.75),
         colors=C(0.25, 0.5, 0.4, belly=0.0, fin="#8db04a"),
     )),
 }
@@ -513,7 +513,7 @@ def _orca(g: FishGenome, r: random.Random):
     """Orcas are male or female at random, and the dorsal fins could hardly be more different."""
     if r.random() < 0.5:  # male: a tall, straight, upright triangle, and a bigger animal
         g.dorsal = FinGenes(True, 0.4, 0.5, r.uniform(0.3, 0.36), "triangle", r.uniform(0.0, 0.1))
-        g.length_cm *= 1.2
+        g.length_cm = SIZES["Orca male"].draw(r)
     else:  # female (and young): a shorter sickle curving back
         g.dorsal = FinGenes(True, 0.4, 0.52, r.uniform(0.14, 0.17), "falcate", r.uniform(0.75, 0.9))
 
@@ -524,8 +524,14 @@ def _pufferfish(g: FishGenome, r: random.Random):
     g.puff_spines = r.randint(70, 95)
 
 
+def _sperm_whale(g: FishGenome, r: random.Random):
+    """Bulls are half as long again as cows."""
+    if r.random() < 0.5:
+        g.length_cm = SIZES["Sperm whale male"].draw(r)
+
+
 # Per-species finishing touches that need more than fixed overrides.
-SPECIAL = {"Orca": _orca, "Pufferfish": _pufferfish}
+SPECIAL = {"Orca": _orca, "Pufferfish": _pufferfish, "Sperm whale": _sperm_whale}
 
 
 def _apply(g: FishGenome, overrides: dict):
@@ -570,6 +576,7 @@ def make_genome(species: str, seed: int, archetype: str | None = None, kind: str
         _apply(g, morphs[names.index(morph)][2])
         g.morph = morph
     individualise(g, species)
+    g.length_cm = SIZES[species].draw(random.Random(f"size:{species}:{seed}"))
     if species in SPECIAL:
         SPECIAL[species](g, random.Random(f"special:{species}:{seed}"))
     return g

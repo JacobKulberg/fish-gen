@@ -88,29 +88,39 @@ def export_gifs(sprite: FishSprite, out_dir: Path, scale: int = 4, background: s
     return paths
 
 
-def build_sheet(sprite: FishSprite, padding: int = 0):
-    """Lay out one row per animation. Returns (RGBA image, {name: [(x, y, w, h), ...]})."""
+def build_sheet(sprite: FishSprite, padding: int = 0, max_width: int | None = None):
+    """Lay out one row per animation. Returns (RGBA image, {name: [(x, y, w, h), ...]}).
+
+    With ``max_width``, an animation too long for one row carries on in the rows under it, so
+    big sprites still fit in a texture."""
     w, h = sprite.size
     anims = [sprite.animations[n] for n in SHOWCASE_ORDER if n in sprite.animations]
     cols = max(len(a.frames) for a in anims)
+    if max_width:
+        cols = max(1, min(cols, (max_width - padding) // (w + padding)))
+    rows = sum(-(-len(a.frames) // cols) for a in anims)
     sheet_w = cols * (w + padding) + padding
-    sheet_h = len(anims) * (h + padding) + padding
+    sheet_h = rows * (h + padding) + padding
     sheet = np.zeros((sheet_h, sheet_w, 4), dtype=np.uint8)
     rects: dict[str, list[tuple[int, int, int, int]]] = {}
-    for row, anim in enumerate(anims):
-        y = padding + row * (h + padding)
+    row = 0
+    for anim in anims:
         rects[anim.name] = []
-        for col, frame in enumerate(anim.frames):
-            x = padding + col * (w + padding)
+        for i, frame in enumerate(anim.frames):
+            x = padding + (i % cols) * (w + padding)
+            y = padding + (row + i // cols) * (h + padding)
             sheet[y:y + h, x:x + w] = frame
             rects[anim.name].append((x, y, w, h))
+        row += -(-len(anim.frames) // cols)
     return Image.fromarray(sheet), rects
 
 
-def export_sheet(sprite: FishSprite, out_dir: Path, stem: str, padding: int = 0) -> tuple[Path, Path, dict]:
-    """Sprite sheet PNG + engine-agnostic JSON describing every animation."""
+def export_sheet(sprite: FishSprite, out_dir: Path, stem: str, padding: int = 0,
+                 max_width: int | None = None) -> tuple[Path, Path, dict]:
+    """Sprite sheet PNG + engine-agnostic JSON describing every animation (see ``build_sheet``
+    for ``max_width``)."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    img, rects = build_sheet(sprite, padding)
+    img, rects = build_sheet(sprite, padding, max_width)
     png = out_dir / f"{stem}.png"
     img.save(png)
     w, h = sprite.size

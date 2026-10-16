@@ -486,6 +486,36 @@ def test_real_lengths_are_realistic():
     assert len({round(x, 3) for x in cm("Koi")}) == 6  # individuals differ in size
 
 
+def test_every_species_has_a_measured_size():
+    from fishgen.sizes import SIZES
+    from fishgen.species import RANDOM, SPECIES_NAMES, make_genome
+
+    for name in SPECIES_NAMES:
+        if name == RANDOM:
+            continue
+        size = SIZES[name]
+        assert size.low <= size.typical <= size.high and size.source, name
+        male = SIZES.get(f"{name} male", size)  # some species have a range per sex
+        for seed in range(5):
+            assert min(size.low, male.low) <= make_genome(name, seed).length_cm <= max(size.high, male.high), name
+    # The sexes differ: bull sperm whales are far longer than any cow.
+    sperm = [make_genome("Sperm whale", s).length_cm for s in range(20)]
+    assert max(sperm) > SIZES["Sperm whale"].high and min(sperm) < SIZES["Sperm whale male"].low
+
+
+def test_sheet_rows_wrap_to_a_max_width(sprite):
+    from fishgen.export import build_sheet
+
+    img, rects = build_sheet(sprite, max_width=100)
+    w, h = sprite.size
+    assert img.width <= 100
+    for name, anim in sprite.animations.items():
+        assert len(rects[name]) == len(anim.frames)
+    every = [r for rs in rects.values() for r in rs]
+    assert len(set(every)) == len(every)  # no two frames share a cell
+    assert all(x + w <= img.width and y + h <= img.height for x, y, _, _ in every)
+
+
 def test_species_come_in_colour_varieties():
     from fishgen.species import make_genome, morphs_of
 

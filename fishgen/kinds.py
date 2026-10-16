@@ -313,7 +313,7 @@ def individualise(g: FishGenome, salt: str) -> FishGenome:
         return max(lo, min(hi, x))
 
     g.height *= U(0.86, 1.14)
-    g.length_cm *= U(0.8, 1.15)  # adults of one species still differ a good deal in size
+    g.length_cm *= U(0.8, 1.15)  # a preset then draws its real size (sizes.py)
     g.thickness *= U(0.9, 1.1)
     g.nose = clip(g.nose * U(0.88, 1.12), 0.3, 2.0)
     g.peduncle *= U(0.88, 1.12)
