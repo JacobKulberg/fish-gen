@@ -79,6 +79,19 @@ you, just as in photos of a manta gliding by.
 
 <img src="docs/images/rays.gif" alt="A manta, a spotted eagle ray and a cownose ray flapping, seen from the side" width="100%">
 
+**Scariness.** Every animal has a `scariness` from 0 to 1 (`--scariness`, or the slider in
+the GUI's *Mouth & scariness* section). Turn it up and the lower jaw swings open in 3D: the
+skin over the opening is cut away onto a modelled mouth (gums, palate and a throat that falls
+into shadow) with a row of triangular teeth set along each jaw. The brow comes down over the
+eye in a glower, and big animals pick up more scars. Great whites, tigers, makos and great barracudas are scary out of the box;
+filter feeders and nurse sharks are not. In pixel art the maw is drawn in a dark colour of its
+own with each tooth a crisp pixel of white, so it still reads at 32 px.
+
+**Sea urchins** are a flattened dome with its spines in staggered columns from the mouth to
+the crown, as on the real animal, lit from above and shadowed underneath and down among the
+roots. A small sprite draws fewer, bolder spines than a big one, so they stay distinct spikes
+rather than fuzz.
+
 ## Gallery
 
 **24 random fish** (`fishgen generate --count 24`): no two alike.
@@ -154,7 +167,8 @@ fishgen generate --species Clownfish --count 5  # five different clownfish
 fishgen generate --species "Tiger shark" --to-scale   # to scale: ~70px long
 fishgen generate --species Koi --morph Showa    # pick the colour variety
 fishgen generate --species Pufferfish           # includes the puff-up animations
-fishgen sprite koi -x 3                         # 3x smoother: 24 swim / 30 turn frames at 30 fps
+fishgen sprite koi --scariness 1                # a koi with fangs and a glare
+fishgen sprite koi -x 1                         # choppier (and 3x quicker): 8 swim / 10 turn frames at 10 fps
 fishgen generate --kind ray --count 4           # four random rays: ./out/ray_<seed>/
 fishgen generate --kind whale --size 96         # fitted to a 96x96 sprite
 fishgen generate --count 20 --size 16 --out fish    # 20 fish, each a 16x16 sprite
@@ -176,6 +190,7 @@ and writes the sprite sheet, JSON and GIFs (`--formats all` for the rest).
 | `--kind KIND` | fish | `fish`, `shark`, `whale`, `ray`, `squid`, `octopus` or `urchin`: a random animal of that kind |
 | `--species NAME` | random | preset (implies its kind; also works with `preview` and `gui`); case, spaces and hyphens don't matter, and a unique part is enough (`hammer`) |
 | `--morph NAME` | from the seed | colour variety of the `--species` |
+| `--scariness X` | the species' own | 0 = as nature made it .. 1 = jaws agape, full of teeth, a glowering eye |
 | `--size N` or `WxH` | `64` | fit the animal into this canvas (16, 32, 64, 96, 128, 48x32...) |
 | `--to-scale` | | draw animals to scale with each other instead of a fixed canvas |
 | `--px-per-m PX` | `16` | to scale: pixels per metre of animal |
@@ -186,7 +201,7 @@ and writes the sprite sheet, JSON and GIFs (`--formats all` for the rest).
 | `--swim-frames` | `8` | frames per swim cycle |
 | `--turn-frames` | `10` | frames per turn-around |
 | `--fps` | `10` | playback rate written into every format |
-| `--smoothness X`, `-x X` | `1` | multiplies swim frames, turn frames and fps together: `-x 3` is three times as smooth at the same speed |
+| `--smoothness X`, `-x X` | `3` | multiplies swim frames, turn frames and fps together: `-x 3` is three times as smooth at the same speed |
 | `--pitch` | `0.25` | camera tilt (radians); higher shows more of the back |
 | `--formats` | all | any of `gif,sheet,godot,frames` |
 | `--count` | `1` | batch: consecutive seeds, one folder each |
@@ -264,7 +279,9 @@ func _on_finished():  # turns and puffs don't loop
    Other animals reuse the same spine: flukes lie flat and whales bend it vertically, rays and
    squid add flapping wing sheets, cephalopod arms are tapering tubes hung off the end of the
    body, a hammerhead's head is a flat sheet with the eyes on its tips, and urchin spines are
-   tapering cylinders. Ray wings beat with the tip lagging the root and the body heaving.
+   tapering cylinders standing in columns. A scary animal's lower jaw swings open about the
+   corner of its mouth; the opening is cut out of the skin and lined with a mouth cavity, and
+   each tooth is a triangular blade posed rigidly with its jaw. Ray wings beat with the tip lagging the root and the body heaving.
    Mesh resolution follows the sprite size.
 3. **Rasterizer** (`raster.py`) - z-buffered triangles sampled at pixel centres. Frames are
    rendered at up to 4x4 samples per pixel and averaged down.

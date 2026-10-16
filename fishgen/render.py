@@ -24,8 +24,8 @@ import numpy as np
 
 from . import native
 from . import palette as P
-from .geometry import (ANAL, ARM, BODY, CAUDAL, DORSAL, FAR_PARTS, FIN_PARTS, LOBE, PECTORAL_FAR, PECTORAL_NEAR,
-                       PELVIC_FAR, PELVIC_NEAR, WING_PARTS, FishModel, Pose, _camera)
+from .geometry import (ANAL, ARM, BODY, CAUDAL, DORSAL, FAR_PARTS, FIN_PARTS, LOBE, MOUTH, PECTORAL_FAR,
+                       PECTORAL_NEAR, PELVIC_FAR, PELVIC_NEAR, TEETH, WING_PARTS, FishModel, Pose, _camera)
 from .genome import FishGenome
 from .raster import EMPTY_DEPTH, rasterize
 
@@ -210,8 +210,10 @@ class FishRenderer:
         """Render a pose to an (h, w, 4) uint8 RGBA array."""
         return self.render_with_eyes(pose)[0]
 
-    def render_with_eyes(self, pose: Pose) -> tuple[np.ndarray, list[tuple[float, float, float]]]:
-        """Render a pose; also returns each visible eye as (x, y, radius) in output pixels."""
+    def render_with_eyes(self, pose: Pose) -> tuple[np.ndarray, list[tuple[float, float, float]], np.ndarray | None]:
+        """Render a pose; also returns each visible eye as (x, y, radius) in output pixels, and
+        for an animal with gaping jaws, how much of each output pixel is maw and how much is
+        teeth (h, w, 2), else None."""
         ss = self.ss
         W, H = self.width * ss, self.height * ss
         s = self.scale * ss
@@ -268,7 +270,12 @@ class FishRenderer:
             out = np.where(a[..., None] > 1e-6, pre / np.maximum(a[..., None], 1e-6), 0.0)
             alpha = a
         rgba = np.concatenate([out, alpha[..., None]], axis=-1)
-        return np.round(np.clip(rgba, 0, 1) * 255).astype(np.uint8), [(x / ss, y / ss, r / ss) for x, y, r in seen]
+        mouth = None
+        if model.jaw:  # where the open mouth and the teeth show, for the pixel-art pass
+            mouth = np.stack([np.isin(part, (MOUTH, TEETH)), part == TEETH], -1) & ~fins[..., None]
+            mouth = mouth.reshape(self.height, ss, self.width, ss, 2).mean(axis=(1, 3))
+        return (np.round(np.clip(rgba, 0, 1) * 255).astype(np.uint8), [(x / ss, y / ss, r / ss) for x, y, r in seen],
+                mouth)
 
     # ------------------------------------------------------------------ lighting helpers
     def _shadow_map(self, screen, cam, pose, s):
@@ -365,7 +372,7 @@ class FishRenderer:
         n = n / (np.linalg.norm(n, axis=1, keepdims=True) + 1e-9)
         is_wing = np.isin(pm, WING_PARTS)
         wing_top = is_wing & (n[:, 2] >= 0)  # wing normals point up: facing us means we see its top
-        two_sided = np.isin(pm, (*WING_PARTS, LOBE))
+        two_sided = np.isin(pm, (*WING_PARTS, LOBE, MOUTH, TEETH))
         n = np.where((two_sided & (n[:, 2] < 0))[:, None], -n, n)
         ao = ao_map[mask]
         px, py, pz = self._pixel_xyz(mask, depth, W, H)
@@ -379,6 +386,9 @@ class FishRenderer:
             albedo[body], gloss[body], silver[body] = self._body_albedo(at[body], pm[body], s, pose)
         if is_wing.any():
             albedo[is_wing], gloss[is_wing] = self._wing_albedo(at[is_wing], wing_top[is_wing], pm[is_wing], s)
+        inside = np.isin(pm, (MOUTH, TEETH))
+        if inside.any():
+            albedo[inside], gloss[inside] = self._mouth_albedo(at[inside], pm[inside])
         lobe = pm == LOBE
         if lobe.any():  # cephalic fins: dark skin, paler on the inner face and towards the tip
             col = _mix(self.c_base, self.c_base * 0.5 + self.c_belly * 0.5, smoothstep(0.3, 1.0, at[lobe, 4]) * 0.6)
@@ -465,18 +475,18 @@ class FishRenderer:
         # Skin: fine mottling everywhere, chromatophores on cephalopods, nicks and scars on big animals.
         grain = fbm(u1 * 40.0, u2 * 40.0, seed + 3.0, 3)
         mott = {"fish": 0.05, "shark": 0.07, "whale": 0.08, "ray": 0.08, "squid": 0.06, "octopus": 0.12,
-                "urchin": 0.15}[g.kind]
+                "urchin": 0.04}[g.kind]
         col *= (1.0 + mott * grain)[:, None]
         if g.kind in ("squid", "octopus"):
             dots = _hash(np.floor(u1 / 0.012), np.floor(u2 / 0.012), seed + 9.0)
             chrom = (dots > 0.8) * smoothstep(1.0, 2.5, 0.012 / px_len)
             col = _mix(col, col * np.array([0.55, 0.3, 0.25]), chrom * 0.7)
             gloss = gloss * (1.0 + 0.5 * grain)
-        if g.kind == "urchin":  # the shell is studded with the knobs the spines grow from
-            knob = _hash(np.floor(u1 / 0.03), np.floor(u2 / 0.03), seed)
-            col *= (1.0 - 0.25 * (knob > 0.6))[:, None]
-        if g.scars > 0:
-            col = _mix(col, col * 1.6 + 0.04, self._scars(u1, u2, px_len) * g.scars)
+        if g.kind == "urchin":
+            col = self._urchin_shell(col, a, v, w)
+        scars = min(1.0, g.scars + 0.5 * g.scariness * (g.kind != "fish"))
+        if scars > 0:
+            col = _mix(col, col * 1.6 + 0.04, self._scars(u1, u2, px_len) * scars)
         if g.knobs > 0:  # humpback tubercles on the head
             kn = _hash(np.floor(u1 / 0.018), np.floor(u2 / 0.018), seed + 5.0)
             fu = u1 / 0.018 - np.floor(u1 / 0.018) - 0.5
@@ -510,7 +520,8 @@ class FishRenderer:
                 col = _mix(col, col * 0.35, slit * 0.85)
                 col = col * (1.0 + 0.12 * lip)[:, None]
         if g.mouth > 0 and not is_arm.all():
-            col = self._mouth(col, a, v, ang, px_len)
+            if not self.model.jaw:  # a gaping jaw is real geometry (MOUTH and TEETH parts)
+                col = self._mouth(col, a, v, ang, px_len)
         if g.kind == "whale":  # blowhole on top of the head
             ba = g.eye_pos * 0.6 + 0.05 if g.beak else g.eye_pos + 0.03
             hole = smoothstep(0.012 + px_len * 0.5, 0.004, np.hypot(a - ba, (np.abs(ang - math.pi / 2)) * 0.02))
@@ -565,6 +576,33 @@ class FishRenderer:
             line = inside * smoothstep(width, width * 0.3, np.abs(dv))
             col = _mix(col, col * 0.25, line)
         return col
+
+    def _mouth_albedo(self, at, pm):
+        """Inside a gaping mouth: pink, wet gums along both lips darkening to a deep red throat
+        (the shadows and occlusion of the cavity do the rest), and ivory teeth."""
+        depth = np.sin(math.pi * np.clip(at[:, 4], 0.0, 1.0))  # 0 at the lips .. 1 at the back
+        flesh = _mix(np.array([0.36, 0.08, 0.08]), np.array([0.07, 0.01, 0.012]), smoothstep(0.1, 0.6, depth))
+        tooth = np.array([0.88, 0.85, 0.74]) * (0.8 + 0.2 * at[:, 4])[:, None]  # yellowing at the root
+        col = np.where((pm == TEETH)[:, None], tooth, flesh)
+        return col, np.where(pm == TEETH, 0.7, 0.55)
+
+    def _urchin_shell(self, col, a, v, w):
+        """The shell between the spines: five paler bands of tube-feet running up from the mouth
+        to the crown, and the crown itself, a dark ring round a pale knob at the top."""
+        x = 2.0 * a - 1.0
+        r = np.sqrt(np.clip(1.0 - x * x, 0.0, 1.0))
+        lat = np.arcsin(np.clip(r * v, -1, 1))
+        lon = np.arctan2(r * w, x)
+        twist = (self.genome.seed % 97) * 0.37
+        bands = smoothstep(0.55, 0.85, np.cos(5.0 * (lon - twist))) * smoothstep(-0.9, -0.5, lat) * \
+            smoothstep(1.3, 1.1, lat)
+        col = _mix(col, col * 1.45 + 0.01, bands * 0.6)
+        ring = smoothstep(1.22, 1.3, lat) * smoothstep(1.45, 1.38, lat)
+        col = _mix(col, col * 0.35, ring)
+        col = col * 0.5  # in the shade of the spines
+        knob = smoothstep(1.4, 1.46, lat)  # the anal cone: the spine colour, unless the species has its own
+        cone = self.c_accent2 if self.genome.colors.accent2_color else self.c_fin * 0.8
+        return _mix(col, cone, knob * 0.85)
 
     def _scars(self, u1, u2, px_len):
         """A few faint, healed scratches, curved and broken, unique to each animal."""
@@ -895,10 +933,14 @@ class FishRenderer:
         dl = d3 @ self._sun
         cyl = np.sqrt(np.clip(1 - dl ** 2, 0, 1))
         toward = np.clip(d3[:, 2], -1, 1)
+        # Where on the ball the spine stands: up towards the sun and lit, or underneath in shadow.
+        ball = 0.5 + 0.5 * (d3 @ self._sun)
         span = np.abs(p1[:, :2] - p0[:, :2]).max(axis=1)
         steps = int(min(400, max(4, span.max() * 1.2)))
         t = np.linspace(0.0, 1.0, steps)
-        rad = base_r * s * (1.0 - 0.85 * t) ** 0.9  # (steps,)
+        # At least about a pixel thick at the root, so each spine stays a clear stroke in pixel art.
+        taper = 0.85 if g.puff_spines else g.spines.taper
+        rad = max(base_r * s, 0.8 * self.ss) * np.maximum(1.0 - taper * t, 0.05) ** 0.9  # (steps,)
         rmax = max(0.5, float(rad.max()))
         R = int(math.ceil(rmax))
         offs = np.array([(dx, dy) for dy in range(-R, R + 1) for dx in range(-R, R + 1)])
@@ -916,7 +958,7 @@ class FishRenderer:
             o_ = (woy[hit] + R) * (2 * R + 1) + (wox[hit] + R)
             iy, ix, z = hit // W, hit % W, win_z[hit]
             win = slice(None)
-            self._shade_spines(rgb, alpha, depth, k_, t_, o_, ix, iy, z, win, t, rad, offs, cyl, toward)
+            self._shade_spines(rgb, alpha, depth, k_, t_, o_, ix, iy, z, win, t, rad, offs, cyl, toward, ball)
             return
         dist = np.hypot(offs[:, 0], offs[:, 1])
         pts = p0[:, None] + (p1 - p0)[:, None] * t[None, :, None]  # (k, steps, 3)
@@ -936,19 +978,23 @@ class FishRenderer:
         last[:-1] = pix[order][1:] != pix[order][:-1]
         win = order[last]
         k_, t_, o_ = ks[win], ts[win], os_[win]
-        self._shade_spines(rgb, alpha, depth, k_, t_, o_, ix, iy, z, win, t, rad, offs, cyl, toward)
+        self._shade_spines(rgb, alpha, depth, k_, t_, o_, ix, iy, z, win, t, rad, offs, cyl, toward, ball)
 
-    def _shade_spines(self, rgb, alpha, depth, k_, t_, o_, ix, iy, z, win, t, rad, offs, cyl, toward):
+    def _shade_spines(self, rgb, alpha, depth, k_, t_, o_, ix, iy, z, win, t, rad, offs, cyl, toward, ball):
         g = self.genome
         base_col = _lin(self.palette.colors[P.FIN])
-        tip_col = base_col * 0.55 + 0.45 * np.array([0.9, 0.88, 0.8])
         tt = t[t_]
+        # One colour from root to tip (a little lighter towards the tip, never washed out), dark
+        # down among the roots where the spines shade each other.
+        col = base_col[None, :] * (0.8 + 0.4 * tt)[:, None]
+        root = 0.2 + 0.8 * smoothstep(0.0, 0.6, tt)
         # Across the spine: brighter on the side facing the light (a cheap cylinder shading).
         across = (offs[o_, 0] * 0.0 + offs[o_, 1] * -1.0) / np.maximum(rad[t_], 0.5)
-        col = base_col[None, :] * (1 - tt[:, None]) + tip_col[None, :] * tt[:, None]
-        light = 0.25 + 0.75 * cyl[k_] * (0.75 + 0.25 * np.clip(across, -1, 1)) + 0.15 * np.clip(toward[k_], 0, 1)
-        shade = col * (SUN * light[:, None] * 0.75 + SKY * 0.5)
-        spec = (cyl[k_] ** 30) * g.gloss * 0.6
+        side = 0.75 + 0.25 * np.clip(across, -1, 1)
+        lit = ball[k_] ** 2
+        light = root * (0.12 + 0.88 * lit * cyl[k_] * side) + 0.12 * np.clip(toward[k_], 0, 1)
+        shade = col * (SUN * light[:, None] * 0.9 + SKY * (0.25 + 0.35 * ball[k_])[:, None])
+        spec = (cyl[k_] ** 30) * g.gloss * 0.6 * lit * root
         shade = shade + spec[:, None]
         yy, xx = iy[win], ix[win]
         rgb[yy, xx] = shade
@@ -1030,6 +1076,14 @@ class FishRenderer:
             # The cornea mirrors the bright water above in its upper half.
             col = col + ENV_TOP * 0.06 * smoothstep(0.2, -0.9, ny)[..., None] * sph[..., None]
             edge = smoothstep(1.0, 0.85, rho)
+            if g.scariness > 0:
+                # A glowering brow: a lid slanting down towards the snout hides the top of the eye.
+                sc = g.scariness
+                front = nx * (1.0 if fwd >= 0 else -1.0) * min(1.0, abs(fwd) * 3)
+                lid = -1.0 + 0.6 * sc + 0.4 * sc * front  # never past the middle: the pupil shows
+                edge = edge * smoothstep(lid - 0.05, lid + 0.15, ny)
+                brow = smoothstep(0.35, 0.0, np.abs(ny - lid + 0.1)) * (rho < 1.3) * sc
+                region *= (1.0 - 0.5 * brow)[..., None]
             out = _mix(region, col, edge)
             region[inside] = out[inside]
             rgb[y0:y1, x0:x1] = region
@@ -1041,7 +1095,7 @@ def _spine_radius(g: FishGenome) -> float:
     if g.puff_spines:
         return 0.012
     sp = g.spines
-    return float(np.clip(0.9 / max(sp.count, 1) ** 0.5 * (0.6 + sp.length), 0.006, 0.05))
+    return float(np.clip(0.55 / max(sp.count, 1) ** 0.5 * (0.5 + sp.length), 0.008, 0.045))
 
 
 def _cleanup(part: np.ndarray) -> np.ndarray:

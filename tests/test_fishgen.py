@@ -288,8 +288,103 @@ def test_new_body_parts_are_built():
     assert (FishModel(make_genome("Octopus", 1)).mesh.tri_part == ARM).any()
     assert (FishModel(make_genome("Cownose ray", 1)).mesh.tri_part == WING_NEAR).any()
     assert (FishModel(make_genome("Hammerhead shark", 1)).mesh.tri_part == WING_NEAR).any()
-    urchin = FishModel(make_genome("Purple sea urchin", 1))
+    urchin = FishModel(make_genome("Purple sea urchin", 1), detail=256)
     assert len(urchin._spine_lines(0.0)) == urchin.g.spines.count > 0 and not urchin.eyes
+
+
+def test_small_urchins_draw_fewer_spines():
+    """Past what the sprite has room for, spines would fuse into fuzz, so small sprites draw fewer."""
+    from fishgen.geometry import FishModel
+    from fishgen.species import make_genome
+
+    g = make_genome("Purple sea urchin", 1)
+    counts = [len(FishModel(g, detail=d)._spine_lines(0.0)) for d in (16, 32, 64, 256)]
+    assert counts == sorted(counts) and counts[0] >= 12 and counts[-1] == g.spines.count
+
+
+def test_scariness_opens_the_jaw_and_shows_teeth():
+    import numpy as np
+
+    from fishgen.geometry import FishModel, Pose
+    from fishgen.render import FishRenderer
+    from fishgen.species import make_genome
+
+    calm = make_genome("Great white shark", 1)
+    calm.scariness = 0.0
+    assert FishModel(calm).jaw is None
+    scary = make_genome("Great white shark", 1)
+    assert scary.scariness > 0.5  # great whites are scary out of the box
+    model = FishModel(scary)
+    assert model.jaw is not None and model.jaw.gape > 0
+    # A real mouth: the inside of it and the teeth are geometry of their own, and the skin
+    # over the opening is cut away.
+    from fishgen.geometry import BODY, MOUTH, TEETH
+    parts = model.mesh.tri_part
+    assert (parts == MOUTH).any() and (parts == TEETH).sum() >= 2 * len(model.teeth) > 0
+    assert (parts == BODY).sum() < (FishModel(calm).mesh.tri_part == BODY).sum()
+    # The lower jaw has swung down, the skull and everything behind the corner of the mouth hasn't.
+    rest = model.mesh.verts
+    gaping = model.deform(rest, Pose())[:, 1]
+    jaw, model.jaw = model.jaw, None
+    drop = model.deform(rest, Pose())[:, 1] - gaping
+    model.jaw = jaw
+    assert drop.max() > 0.7 * model.jaw.gape and (drop[rest[:, 0] > model.jaw.a1] == 0).all()
+    _, _, mouth = FishRenderer(scary, 64, 64).render_with_eyes(Pose())
+    assert (mouth[..., 0] > 0.45).sum() >= 4 and (mouth[..., 1] > 0.35).sum() >= 1
+    assert FishRenderer(calm, 64, 64).render_with_eyes(Pose())[2] is None
+    # Even an animal with no mouth of its own gets one.
+    koi = make_genome("Koi", 1)
+    koi.scariness = 1.0
+    assert FishModel(koi).jaw is not None and np.isfinite(FishModel(koi).mesh.verts).all()
+
+
+def test_scariness_varies_with_the_seed():
+    from fishgen.species import make_genome
+
+    whites = {round(make_genome("Great white shark", seed).scariness, 3) for seed in range(8)}
+    assert len(whites) > 4 and min(whites) >= 0.5
+    assert {make_genome("Whale shark", seed).scariness for seed in range(8)} == {0.0}
+
+
+def test_eyes_stay_visible_beside_a_gaping_mouth():
+    """The open mouth must never swallow the eye: in every swim frame the pupil pixel is much
+    darker than the skin round it and isn't the maw's colour."""
+    import numpy as np
+
+    import fishgen.animation as anim
+    from fishgen.species import make_genome
+
+    for name in ("Great white shark", "Mako shark", "Great barracuda", "Koi"):
+        for size in (64, 32):
+            g = make_genome(name, 1)
+            g.scariness = 1.0
+            seen = {}
+            real = anim.pixelate
+
+            def spy(frames, *a, **kw):
+                seen.update(kw)
+                return real(frames, *a, **kw)
+
+            anim.pixelate = spy
+            try:
+                s = anim.generate(1, size, size, genome=g, swim_frames=2, turn_frames=2)
+            finally:
+                anim.pixelate = real
+            for frame, eyes in zip(s.animations["swim_right"].frames, seen["eyes"]):
+                lum = frame[..., :3].astype(float) @ [0.3, 0.59, 0.11]
+                for x, y, r in eyes:
+                    ix, iy = int(x), int(y)
+                    ring = np.delete(lum[iy - 1:iy + 2, ix - 1:ix + 2].ravel(), 4)
+                    assert lum[iy, ix] < np.median(ring) - 25, (name, size)
+
+
+def test_scariness_cli_flag(tmp_path):
+    from fishgen.cli import main
+
+    assert main(["generate", "--species", "Koi", "--scariness", "0.8", "--size", "24", "--swim-frames", "2",
+                 "--turn-frames", "2", "-x", "1", "--formats", "sheet", "--out", str(tmp_path), "--seed", "1"]) == 0
+    with __import__("pytest").raises(SystemExit):
+        main(["generate", "--species", "Koi", "--scariness", "2", "--out", str(tmp_path)])
 
 
 # What every animal of a kind must have, whatever the seed.

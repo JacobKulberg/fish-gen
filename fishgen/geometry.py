@@ -39,6 +39,8 @@ WING_NEAR = 9  # ray wings, squid fins, the hammerhead's head: shaded like skin
 WING_FAR = 10
 ARM = 11
 LOBE = 12  # manta cephalic fins and the cownose ray's snout lobes: skin, shaded like the head
+MOUTH = 13  # the inside of a gaping mouth: gums, palate and throat
+TEETH = 14
 FIN_PARTS = (DORSAL, ANAL, CAUDAL, PELVIC_NEAR, PELVIC_FAR, PECTORAL_NEAR, PECTORAL_FAR)
 FAR_PARTS = (PELVIC_FAR, PECTORAL_FAR)
 WING_PARTS = (WING_NEAR, WING_FAR)
@@ -100,6 +102,60 @@ class Eye:
     radius: float
 
 
+@dataclass
+class Jaw:
+    """A scary animal's gaping mouth, in rest space. The mouth runs from ``a0`` to the corner
+    at ``a1`` along the line ``line(a)`` (v: -1 belly .. 1 back). The lower jaw swings open
+    about the corner, by ``gape`` body lengths at the front; the strip of skin ``band`` (in v)
+    under the line stretches open into the maw, which the renderer paints with teeth."""
+
+    a0: float
+    a1: float
+    height: float  # where the line starts
+    rise: float  # how far it climbs towards the corner
+    band: float
+    gape: float
+
+    @property
+    def front(self) -> float:
+        """Where the open mouth starts: the nose, or a shark's chin just ahead of its mouth
+        (the snout in front of that overhangs the jaws and stays put)."""
+        return self.a0 - 0.04 if self.a0 > 0.04 else 0.0
+
+    def t(self, a):
+        return np.clip((np.asarray(a, dtype=float) - self.a0) / (self.a1 - self.a0), 0.0, 1.0)
+
+    def hinge(self, a):
+        """How far the lower jaw has swung down here: 1 at the front of the mouth, 0 at the corner."""
+        a = np.asarray(a, dtype=float)
+        h = np.clip((self.a1 - a) / (self.a1 - self.a0), 0.0, 1.0)
+        if self.front > 0:
+            h = h * np.clip((a - self.front) / (self.a0 - self.front), 0.0, 1.0)
+        return h
+
+    def line(self, a):
+        return self.height + self.rise * self.t(a) ** 1.3
+
+
+def jaw(g: FishGenome) -> Jaw | None:
+    """The open jaw of an animal with ``scariness``, or None when its mouth stays shut."""
+    s = g.scariness
+    if s <= 0 or g.kind not in ("fish", "shark", "whale"):
+        return None
+    length = max(g.mouth, 0.13 * s)  # a scary animal gets a big mouth to go with the teeth
+    a0 = max(0.012, g.eye_pos - 0.03) if g.kind == "shark" else 0.0  # sharks' is under the snout
+    # The lips climb only a little towards the corner, leaving skin between the mouth and the eye.
+    # It opens wide on a deep head, but only a menacing crack on a slim one (a barracuda's).
+    gape = s * min(0.85 * length, 0.4 * g.height)
+    return Jaw(a0, a0 + length, g.mouth_height, 0.12, 0.16, gape)
+
+
+def smooth_bump(x):
+    """1 at 0, easing to 0 at |x| >= 1."""
+    x = np.clip(np.abs(x), 0.0, 1.0)
+    return 1.0 - x * x * (3 - 2 * x)
+
+
 def _resample(points: list[tuple[float, float]], n: int) -> np.ndarray:
     """Resample a polyline to n points evenly spaced by arc length."""
     p = np.asarray(points, dtype=float)
@@ -123,6 +179,8 @@ class FishModel:
         self.fin_rows = int(np.clip(detail // 24, 4, 24))
         self.detail = detail
         self.centre_a = 0.5 if genome.profile == "sphere" else 0.45
+        self.jaw = jaw(genome)
+        self.teeth = []
         tail = 0.02 if genome.tail_shape == "none" else genome.tail_length * 1.35 + 0.05
         self.tail_end = 1.0 + tail
         self._build()
@@ -197,10 +255,124 @@ class FishModel:
         lift = g.flat_head * (float(self.top(g.peak)) - self.top(a)) * 0.85
         return np.where(a < g.peak, lift, 0.0)
 
+    def _jaw_rings(self, a: np.ndarray) -> np.ndarray:
+        """Angles round each body ring, crowded into the strip under the mouth line on both
+        sides, so the strip can stretch open into a maw and still carry crisp teeth."""
+        j = self.jaw
+        n = self.ring_verts
+        fine = np.linspace(0.0, 2 * math.pi, 2048, endpoint=False)
+        T = np.empty((len(a), n))
+        for i, ai in enumerate(a):
+            hi = float(j.line(ai))
+            lo = max(-1.0, hi - j.band)
+            t_hi, t_lo = math.asin(np.clip(hi, -1, 1)), math.asin(lo)
+            mid, half = 0.5 * (t_hi + t_lo), 0.5 * (t_hi - t_lo) + 0.05
+            dens = np.ones_like(fine)
+            for c in (mid, math.pi - mid):  # near and far side
+                d = np.angle(np.exp(1j * (fine - c)))
+                dens += 6.0 * smooth_bump(d / half)
+            cdf = np.concatenate([[0.0], np.cumsum(dens)])
+            cdf /= cdf[-1]
+            row = np.interp(np.arange(n) / n, cdf, np.append(fine, 2 * math.pi))
+            # Rings of vertices exactly on both lips, so the opening cut out between them is clean.
+            for target in (t_hi, t_lo, math.pi - t_hi, math.pi - t_lo):
+                target %= 2 * math.pi
+                row[np.argmin(np.abs(np.angle(np.exp(1j * (row - target)))))] = target
+            T[i] = np.sort(row)
+        return T
+
+    def _rim(self, a: np.ndarray, s: np.ndarray, side: float) -> np.ndarray:
+        """Rest-space points across the open strip of skin: ``s`` 0 on the upper lip, 1 on the
+        lower, on the near (``side`` 1) or far (-1) flank."""
+        j = self.jaw
+        v = j.line(a) - s * j.band
+        y = np.where(v >= 0, self.top(a), self.bottom(a)) * v
+        return np.stack(np.broadcast_arrays(a, y, side * self.half_width(a) * np.sqrt(np.clip(1 - v * v, 0, 1))), -1)
+
+    def _build_mouth(self, add_grid, a: np.ndarray):
+        """The inside of the gaping mouth, and the teeth set along both jaws.
+
+        Over most of the gape the mouth is a closed cavity: a lining on each side runs from the
+        upper lip in under the palate, deep into the head, and back out along the floor of the
+        mouth to the lower lip, so you look into a shadowed throat. Only at the front, where the
+        jaws taper to their tips, is it open between them: a roof (palate) closes the upper jaw
+        and a floor the lower, with water showing through between the two prongs. Everything is
+        built across the strip of skin the jaw opens, so it moves with the jaws. The teeth are
+        posed rigidly with their jaw each frame (see ``_teeth``)."""
+        j = self.jaw
+        a_open = j.front + 0.3 * (j.a1 - j.front)
+        cavity = a[a >= a_open]
+        tip = a[: max(2, int(np.searchsorted(a, a_open)) + 1)]  # overlaps the cavity by one ring
+        S = np.linspace(0.0, 1.0, 11)
+        A, Sg = np.meshgrid(cavity, S, indexing="ij")
+        for side in (1.0, -1.0):
+            v = self._rim(A, Sg, side)
+            v[..., 2] *= 1.0 - 0.85 * np.sin(math.pi * Sg) ** 0.7  # deep into the head at the middle
+            add_grid(v, np.stack([A, Sg, np.full(A.shape, side), 0 * A], -1), MOUTH)
+        A, Ug = np.meshgrid(tip, np.linspace(0.0, 1.0, 7), indexing="ij")  # across, near lip to far
+        for s_, inner in ((0.0, self.top(A)), (1.0, -self.bottom(A))):  # palate, floor
+            v = self._rim(A, np.full(A.shape, s_), 1.0)
+            v[..., 2] *= 1.0 - 2.0 * Ug
+            v[..., 1] += 0.4 * (inner - v[..., 1]) * np.sin(math.pi * Ug)  # vaulted into the jaw
+            add_grid(v, np.stack([A, np.full(A.shape, s_), 0 * A, 0 * A], -1), MOUTH)
+        # Teeth: at least two pixels apart (the body is roughly 0.8 of the sprite across), so
+        # each one still comes out as a pixel of its own in small pixel art.
+        front = j.a0 if self.g.kind == "shark" else 0.01
+        span = j.a1 - front
+        per = max(span / 8.0, 2.0 / (0.8 * self.detail))
+        n = max(2, int(span / per))
+        ta = front + (np.arange(n) + 0.35) * span / n
+        self.teeth = [(float(x), side, upper, span / n, i) for side in (1.0, -1.0) for upper in (True, False)
+                      for i, x in enumerate(ta if upper else ta + 0.5 * span / n) if x < j.a1 - 0.3 * span / n]
+        self.teeth_start = None
+        for x, *_ in self.teeth:
+            r = np.array([[0.0, 0.0], [1.0, 1.0]])
+            start = add_grid(np.zeros((2, 2, 3)), np.stack([np.full((2, 2), x), r, 0 * r, 0 * r], -1), TEETH)
+            self.teeth_start = start if self.teeth_start is None else self.teeth_start
+
+    def _teeth(self, pose: Pose) -> np.ndarray:
+        """Each tooth a triangular blade standing on its lip, rigid with its jaw: (4 per tooth, 3)."""
+        out = []
+        for x, side, upper, per, i in self.teeth:
+            xs = np.array([x - 0.01, x, x + 0.01])
+            lips = self.deform(np.concatenate([self._rim(xs, np.zeros(3), side * 0.93),
+                                               self._rim(xs, np.ones(3), side * 0.93)]), pose)
+            top, bottom = lips[:3], lips[3:]
+            base, other = (top, bottom) if upper else (bottom, top)
+            gap = other[1] - base[1]
+            if self.g.kind == "shark":  # even rows of serrated triangles
+                length = np.linalg.norm(gap) * (0.5 if upper else 0.4)
+            else:  # uneven fangs, alternately long and short, the biggest at the front
+                along_jaw = (x - self.jaw.front) / (self.jaw.a1 - self.jaw.front)
+                size = (1.0 if i % 2 == 0 else 0.5) * (1.3 - 0.6 * along_jaw)
+                length = np.linalg.norm(gap) * min(0.85, (0.55 if upper else 0.45) * size)
+            along = base[2] - base[0]
+            along /= np.linalg.norm(along) + 1e-9
+            width = min(0.85 * per, 1.1 * length + 1e-4)
+            tip = base[1] + gap / (np.linalg.norm(gap) + 1e-9) * length
+            out += [base[1] - along * width / 2, base[1] + along * width / 2, tip, tip]
+        return np.array(out).reshape(-1, 3)
+
+    def _open_jaw(self, p: np.ndarray, pose: Pose | None) -> np.ndarray:
+        """Swing the lower jaw open about the corner of the mouth (and work it a little as it swims)."""
+        j = self.jaw
+        a = p[..., 0]
+        gape = j.gape * (1.0 if pose is None else 0.85 + 0.15 * math.sin(2 * math.pi * pose.phase))
+        hinge = j.hinge(a)
+        ac = np.clip(a, 0.0, 1.0)
+        v = p[..., 1] / np.maximum(np.where(p[..., 1] >= 0, self.top(ac), self.bottom(ac)), 1e-4)
+        q = np.clip((j.line(a) - v) / j.band, 0.0, 1.0)
+        p = p.copy()
+        p[..., 1] -= gape * hinge * q * q * (3 - 2 * q)
+        return p
+
     def deform(self, p: np.ndarray, pose: Pose | None) -> np.ndarray:
-        """Rest-space shape changes applied before posing: flat heads, and a pufferfish puffing up."""
+        """Rest-space shape changes applied before posing: flat heads, a gaping jaw, and a
+        pufferfish puffing up."""
         g = self.g
         inflate = 0.0 if pose is None else pose.inflate
+        if self.jaw:
+            p = self._open_jaw(p, pose)
         if not g.flat_head and not (g.puff and inflate > 0):
             return p
         p = p.copy()
@@ -273,6 +445,8 @@ class FishModel:
         a = np.linspace(0.0, 1.0, self.rings) ** 1.15  # denser near the nose
         t = np.linspace(0.0, 2 * math.pi, self.ring_verts, endpoint=False)
         A, T = np.meshgrid(a, t, indexing="ij")
+        if self.jaw:
+            T = self._jaw_rings(a)
         sin_t, cos_t = np.sin(T), np.cos(T)
         Y = np.where(sin_t > 0, self.top(A), self.bottom(A)) * sin_t
         Z = self.half_width(A) * cos_t
@@ -290,7 +464,15 @@ class FishModel:
 
             add_dynamic(body_fn, np.stack([A, sin_t, cos_t, 0 * A], -1), BODY, wrap=True)
         else:
-            add_grid(body, np.stack([A, sin_t, cos_t, 0 * A], -1), BODY, wrap=True, axis=body_axis)
+            start = add_grid(body, np.stack([A, sin_t, cos_t, 0 * A], -1), BODY, wrap=True, axis=body_axis)
+            if self.jaw:
+                # Cut the open mouth out of the skin, and line the hole with the inside of the mouth.
+                j = self.jaw
+                q = (j.line(A) - sin_t) / j.band
+                gone = ((q > -1e-6) & (q < 1 + 1e-6) & (A <= j.a1) & (A >= j.front)).ravel()
+                keep = ~gone[tris[-1] - start].all(axis=1)
+                tris[-1], parts[-1] = tris[-1][keep], parts[-1][keep]
+                self._build_mouth(add_grid, a[(a <= j.a1) & (a >= j.front)])
 
         # Dorsal / anal fins sit on the top / bottom line of the body.
         def median_fin(fg: FinGenes, part: int, sign: float):
@@ -608,21 +790,35 @@ class FishModel:
         if self.g.puff_spines:
             return self._puff_spikes(inflate)
         sp = self.g.spines
-        n = int(sp.count)
+        # A small sprite has room for only so many spines: past that they fuse into a fuzzy
+        # blob, so it draws fewer, the way a pixel artist would.
+        n = min(int(sp.count), max(12, round(self.detail * 0.8)))
         if n <= 0:
             return np.zeros((0, 2, 3))
         rng = np.random.default_rng(self.g.seed)
-        # Even directions over the ball (Fibonacci lattice), jittered.
-        i = np.arange(n) + 0.5
-        cy = 1.0 - 2.0 * i / n
-        ring = np.sqrt(1.0 - cy ** 2)
-        ang = math.pi * (3.0 - math.sqrt(5.0)) * i + rng.uniform(-0.2, 0.2, n)
-        cx, cz = ring * np.cos(ang), ring * np.sin(ang)
+        # Like a real urchin's, the spines stand in columns running from the mouth underneath up
+        # to the crown, each row staggered against the last; the crown itself is bare.
+        rows = max(3, round(math.sqrt(n / 3.0)))
+        lat = np.linspace(-1.05, 1.2, rows)
+        share = np.cos(lat) / np.cos(lat).sum() * n
+        per_row = np.floor(share).astype(int)
+        per_row[np.argsort(per_row - share)[:n - per_row.sum()]] += 1  # exactly n in all
+        twist = rng.uniform(0, 2 * math.pi)
+        la, lo = [], []
+        for k, (l, m) in enumerate(zip(lat, per_row)):
+            if m:
+                la.append(np.full(m, l))
+                lo.append(twist + 2 * math.pi * (np.arange(m) + 0.5 * (k % 2)) / m)
+        lat_s = np.concatenate(la) + rng.uniform(-0.04, 0.04, n)
+        lon = np.concatenate(lo) + rng.uniform(-0.06, 0.06, n)
+        cy = np.sin(lat_s)
+        cx, cz = np.cos(lat_s) * np.cos(lon), np.cos(lat_s) * np.sin(lon)
         ca = 0.5 + 0.5 * cx
         base = np.stack([ca, np.where(cy > 0, self.top(ca), self.bottom(ca)) * cy, self.half_width(ca) * cz], -1)
         d = np.stack([cx, cy, cz], -1)
-        # Spines underneath are short: the urchin stands on them.
-        length = sp.length * rng.uniform(0.75, 1.15, n) * np.where(cy < -0.55, 0.4, 1.0)
+        # Spines underneath are short (the urchin stands on them), and so are those round the crown.
+        length = sp.length * rng.uniform(0.88, 1.1, n) * np.where(cy < -0.6, 0.6, 1.0) * \
+            (1.0 - 0.2 * np.clip((lat_s - 0.8) / 0.4, 0.0, 1.0))
         # Sway: each tip leans along its own sideways direction, rippling round the ball.
         perp = np.cross(d, rng.normal(size=(n, 3)))
         perp /= np.linalg.norm(perp, axis=1, keepdims=True) + 1e-9
@@ -748,6 +944,8 @@ class FishModel:
                 axis_local[start:start + n] = ax.reshape(-1, 3)
 
         verts = self.deform(verts, pose)
+        if self.jaw and self.teeth:
+            verts[self.teeth_start:self.teeth_start + 4 * len(self.teeth)] = self._teeth(pose)
         axis_local = self.deform(axis_local, pose)
         world = self.pose_points(verts, pose, spine)
 

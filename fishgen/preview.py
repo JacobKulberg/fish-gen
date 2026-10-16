@@ -99,7 +99,7 @@ class TankFish:
 
 class Preview:
     def __init__(self, seed: int, count: int, zoom: float, out: Path, species: str | None = None,
-                 kind: str | None = None, opts: dict | None = None):
+                 kind: str | None = None, opts: dict | None = None, scariness: float | None = None):
         pygame.init()
         pygame.display.set_caption("fishgen preview")
         self.screen = pygame.display.set_mode((1100, 650), pygame.RESIZABLE)
@@ -112,6 +112,7 @@ class Preview:
         self.out = out
         self.species = species
         self.kind = kind
+        self.scariness = scariness
         self.paused = False
         self.show_sheet = False
         self.message = ""
@@ -129,6 +130,8 @@ class Preview:
         for i in range(self.count):
             seed = self.seed + i
             genome = genome_for(seed, self.species, self.kind)
+            if self.scariness is not None:
+                genome.scariness = self.scariness
             sprite = generate(seed, genome=genome, **self.opts)
             self.fish.append(TankFish(sprite, self.zoom, self.bounds(), self.rng))
         seeds = f"{self.seed}" if self.count == 1 else f"{self.seed}..{self.seed + self.count - 1}"
@@ -267,5 +270,5 @@ class Preview:
 
 
 def run(seed: int, count: int = 1, zoom: float = 1.0, out: Path = Path("out"), species: str | None = None,
-        kind: str | None = None, opts: dict | None = None):
-    Preview(seed, count, zoom, out, species, kind, opts).run()
+        kind: str | None = None, opts: dict | None = None, scariness: float | None = None):
+    Preview(seed, count, zoom, out, species, kind, opts, scariness).run()

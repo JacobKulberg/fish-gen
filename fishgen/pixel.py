@@ -106,17 +106,21 @@ def _unique_colours(lab_pixels: np.ndarray, quant: float = 0.006):
 # ---------------------------------------------------------------------------- main
 def pixelate(frames: list[np.ndarray], colors: int | None = None, outline: bool = True,
              alpha_cut: float = 0.5, punch: float = 1.0,
-             eyes: list[list[tuple[float, float, float]]] | None = None) -> tuple[list[np.ndarray], np.ndarray]:
+             eyes: list[list[tuple[float, float, float]]] | None = None,
+             mouths: list[np.ndarray | None] | None = None) -> tuple[list[np.ndarray], np.ndarray]:
     """Make a sprite's RGBA frames pixel art. Returns (frames, palette (n, 3) uint8).
 
     ``colors`` is the palette size for the animal itself (None picks one for the sprite
     size); the outline adds up to three dark shades on top. ``punch`` scales the extra
     contrast and colour given to the shading before it is quantised (0 = none). ``eyes`` lists
-    each frame's visible eyes as (x, y, radius) so small eyes still get a clear pupil pixel.
+    each frame's visible eyes as (x, y, radius) so small eyes still get a clear pupil pixel;
+    ``mouths`` gives each frame's maw and teeth coverage (h, w, 2) or None, so a gaping mouth
+    comes out as a dark gap with crisp white teeth.
     """
     if not frames:
         return frames, np.zeros((0, 3), np.uint8)
     h, w = frames[0].shape[:2]
+    exact = colors is not None  # a palette size asked for is kept to
     colors = colors or auto_colors(w, h)
     stack = np.stack(frames)
     solid = stack[..., 3] >= alpha_cut * 255
@@ -129,14 +133,33 @@ def pixelate(frames: list[np.ndarray], colors: int | None = None, outline: bool 
     pts, counts, inverse = _unique_colours(lab)
     # sqrt weights keep small, distinct details (eyes, stripes) from being outvoted by big flat areas.
     centres = kmeans(pts, np.sqrt(counts), colors)
+    mouth_cols = _mouth_colours(lab_img, mouths)
+    extra = list(mouth_cols)
+    if eyes is not None and any(r < 2.0 for frame in eyes for _, _, r in frame) and centres[:, 0].min() > 0.2:
+        # A pale or bright animal has no dark enough colour for a pupil pixel: give it one, a
+        # very dark shade of its own darkest colour.
+        dark = centres[np.argmin(centres[:, 0])].copy()
+        extra.append(np.array([0.15, dark[1] * 0.4, dark[2] * 0.4]))
+    for c in extra:  # a small maw, a few teeth or a pupil would never win a colour of their own
+        dist = np.linalg.norm(centres - c, axis=1)
+        if dist.min() > 0.06:
+            if exact:  # then it takes the place of the nearest colour instead
+                centres[np.argmin(dist)] = c
+            else:
+                centres = np.vstack([centres, c])
     centres = centres[np.argsort(centres[:, 0])]  # dark to light
     idx_u = _nearest(pts, centres)
     index = np.full(solid.shape, -1, dtype=np.int32)
     index[solid] = idx_u[inverse]
     index = np.stack([_despeckle(f, centres) for f in index])
+    if mouths is not None:
+        maw_i, tooth_i = (int(_nearest(c[None], centres)[0]) for c in mouth_cols[:2]) if mouth_cols else (0, 0)
+        for k, (f, mouth) in enumerate(zip(index, mouths)):
+            if mouth is not None:
+                _mark_mouth(f, mouth, maw_i, tooth_i, eyes[k] if eyes is not None else [])
     if eyes is not None:
-        for f, frame_eyes in zip(index, eyes):
-            _mark_eyes(f, frame_eyes, centres)
+        for k, (f, frame_eyes) in enumerate(zip(index, eyes)):
+            _mark_eyes(f, frame_eyes, centres, mouths[k] if mouths is not None else None)
 
     palette_lab = centres
     if outline:
@@ -222,22 +245,83 @@ def _despeckle(index: np.ndarray, centres: np.ndarray, max_de: float = 0.09) -> 
     return out
 
 
-def _mark_eyes(index: np.ndarray, eyes, centres: np.ndarray):
+def _mark_eyes(index: np.ndarray, eyes, centres: np.ndarray, mouth: np.ndarray | None = None):
     """An eye a few pixels across survives the downscale; a smaller one blurs into the skin.
-    Give those a dark pupil pixel, the way a pixel artist would (unless the skin round the
-    eye is already so dark that a dark pixel wouldn't show)."""
+    Give those a pupil pixel, the way a pixel artist would: dark on a pale head, and on a head
+    so dark that a dark pixel wouldn't show, a light glint instead."""
     h, w = index.shape
     darkest = 0  # the palette is sorted dark to light
     for x, y, r in eyes:
-        if r >= 1.6:
+        if r >= 2.0:
             continue
         ix, iy = int(np.floor(x)), int(np.floor(y))
         if not (0 <= ix < w and 0 <= iy < h) or index[iy, ix] < 0:
             continue
         around = index[max(0, iy - 1):iy + 2, max(0, ix - 1):ix + 2]
         around = around[around >= 0]
-        if centres[around, 0].mean() - centres[darkest, 0] > 0.12:
+        skin = np.median(centres[around, 0])
+        if skin - centres[darkest, 0] > 0.15:
             index[iy, ix] = darkest
+            if mouth is not None:
+                _skin_ring(index, ix, iy, centres, mouth[..., 0] > 0.1)
+        else:
+            index[iy, ix] = int(np.argmin(np.abs(centres[:, 0] - min(1.0, skin + 0.4))))
+
+
+def _skin_ring(index: np.ndarray, ix: int, iy: int, centres: np.ndarray, mouth: np.ndarray):
+    """Keep skin between a one-pixel pupil and a gaping mouth: dark mouth pixels right next to
+    it would swallow it into one dark blob, so they take the skin colour from nearby."""
+    h, w = index.shape
+    win = index[max(0, iy - 2):iy + 3, max(0, ix - 2):ix + 3]
+    pupil = centres[index[iy, ix], 0]
+    light = win[(win >= 0)]
+    light = light[centres[light, 0] > pupil + 0.15]
+    if not len(light):
+        return
+    skin = np.bincount(light).argmax()
+    for dy, dx in N8:
+        y, x = iy + dy, ix + dx
+        if 0 <= y < h and 0 <= x < w and index[y, x] >= 0 and mouth[y, x] and \
+                centres[index[y, x], 0] < pupil + 0.12:
+            index[y, x] = skin
+
+
+def _mouth_colours(lab: np.ndarray, mouths) -> list[np.ndarray]:
+    """The colours of a gaping maw (made dark enough to read as a hole) and of its teeth
+    (bright enough to stand out), or [] when no frame shows a mouth."""
+    if not mouths or all(m is None for m in mouths):
+        return []
+    maws, teeth = [], []
+    for img, m in zip(lab, mouths):
+        if m is not None:
+            maws.append(img[(m[..., 0] >= 0.6) & (m[..., 1] < 0.2)])
+            teeth.append(img[m[..., 1] >= 0.5])
+    maw, tooth = np.concatenate(maws), np.concatenate(teeth)
+    if not len(maw):
+        return []
+    maw = maw.mean(0)
+    maw[0] = min(maw[0], 0.3)
+    tooth = tooth.mean(0) if len(tooth) else np.array([0.95, 0.0, 0.01])
+    tooth[0] = max(tooth[0], 0.88)
+    # A near-black for pupils, darker than the maw, so an eye by the mouth isn't lost in it.
+    pupil = np.array([min(0.15, maw[0] - 0.12), 0.0, 0.0])
+    return [maw, tooth, pupil]
+
+
+def _mark_mouth(index: np.ndarray, mouth: np.ndarray, maw_i: int, tooth_i: int, eyes=()):
+    """A gaping mouth drawn the pixel-art way: a dark maw with every tooth a pixel of white,
+    which a downscale alone would smear into a pinkish blur. It never paints over an eye, nor
+    the pixels right round one, so the eye can't merge into the mouth."""
+    on = index >= 0
+    yy, xx = np.mgrid[:index.shape[0], :index.shape[1]]
+    for x, y, r in eyes:
+        on &= np.maximum(np.abs(xx + 0.5 - x), np.abs(yy + 0.5 - y)) > max(r, 1.0) + 0.6
+    maw, teeth = mouth[..., 0], mouth[..., 1]
+    white = on & (maw >= 0.3) & (teeth >= 0.3)
+    # Teeth stand apart: of a run of white pixels along the jaw, only the first stays white.
+    white &= ~_shift(white, 0, -1, fill=False)
+    index[on & (maw >= 0.45)] = maw_i
+    index[white] = tooth_i
 
 
 def _outline(index: np.ndarray, palette: np.ndarray, shades: int = 3):

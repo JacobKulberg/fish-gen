@@ -8,7 +8,7 @@ import sys
 import time
 from pathlib import Path
 
-from .animation import DEFAULT_PX_PER_M, DEFAULT_SIZE, MAX_PX, MIN_PX, STYLES, generate
+from .animation import DEFAULT_PX_PER_M, DEFAULT_SIZE, DEFAULT_SMOOTHNESS, MAX_PX, MIN_PX, STYLES, generate
 from .export import FORMATS, export_all
 from .genome import KINDS
 from .species import RANDOM, SPECIES_NAMES, genome_for, kind_of, make_genome, morphs_of
@@ -64,6 +64,9 @@ def _add_render_args(p: argparse.ArgumentParser):
                    help=f"preset (implies its kind; case and spaces don't matter): {', '.join(SPECIES_NAMES)}")
     p.add_argument("--morph", default=None, metavar="NAME",
                    help="colour variety of the species, e.g. --species Koi --morph Showa (default: from the seed)")
+    p.add_argument("--scariness", type=float, default=None, metavar="0-1",
+                   help="0 = as nature made it .. 1 = jaws agape and full of teeth, a glowering eye "
+                        "(default: the species' own; great whites and barracudas are already scary)")
     p.add_argument("--size", type=parse_size, default=(DEFAULT_SIZE, DEFAULT_SIZE), metavar="N|WxH",
                    help=f"sprite canvas, e.g. 16, 32, 64, 96, 128 or 48x32; the animal is fitted into it "
                         f"(default {DEFAULT_SIZE})")
@@ -84,9 +87,9 @@ def _add_render_args(p: argparse.ArgumentParser):
     p.add_argument("--swim-frames", type=int, default=8, help="frames per swim cycle (default 8)")
     p.add_argument("--turn-frames", type=int, default=10, help="frames per turn-around (default 10)")
     p.add_argument("--fps", type=float, default=10.0, help="playback speed (default 10)")
-    p.add_argument("--smoothness", "-x", type=float, default=1.0, metavar="X",
+    p.add_argument("--smoothness", "-x", type=float, default=DEFAULT_SMOOTHNESS, metavar="X",
                    help="multiply swim frames, turn frames and fps together: 3 = three times as smooth, "
-                        "same speed (default 1)")
+                        f"same speed (default {DEFAULT_SMOOTHNESS:g})")
     p.add_argument("--pitch", type=float, default=0.25, help="camera tilt in radians (default 0.25)")
 
 
@@ -110,8 +113,14 @@ def _genome(args, seed: int):
         if args.morph not in morphs_of(args.species):
             known = ", ".join(morphs_of(args.species)) or "no varieties"
             raise SystemExit(f"{args.species} has {known}, not {args.morph!r}")
-        return make_genome(args.species, seed, morph=args.morph)
-    return genome_for(seed, args.species, args.kind)
+        g = make_genome(args.species, seed, morph=args.morph)
+    else:
+        g = genome_for(seed, args.species, args.kind)
+    if args.scariness is not None:
+        if not 0 <= args.scariness <= 1:
+            raise SystemExit("--scariness must be between 0 and 1")
+        g.scariness = args.scariness
+    return g
 
 
 def render_opts(args) -> dict:
@@ -175,7 +184,7 @@ def cmd_preview(args) -> int:
         return 1
     seed = args.seed if args.seed is not None else random.randrange(1_000_000)
     run(seed=seed, count=args.fish, zoom=args.zoom, out=Path(args.out), species=args.species, kind=args.kind,
-        opts=render_opts(args))
+        opts=render_opts(args), scariness=args.scariness)
     return 0
 
 

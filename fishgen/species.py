@@ -240,8 +240,8 @@ FISH: dict[str, tuple[str, dict]] = {
     "Great barracuda": ("slender", dict(
         # Long silver torpedo with an underslung jaw full of fangs, dark bars and black blotches.
         length_cm=130, height=0.15, thickness=0.75, nose=1.4, peak=0.45, taper=1.1, peduncle=0.09,
-        flat_head=0.4, eye_size=0.22, eye_pos=0.12, eye_height=0.35, scales=0.008, silver=0.65,
-        fin_alpha=0.85, gloss=0.6, iris_color="#d8d0b0", mouth=0.11, mouth_height=-0.3, teeth=True,
+        flat_head=0.4, eye_size=0.26, eye_pos=0.12, eye_height=0.35, scales=0.008, silver=0.65,
+        fin_alpha=0.85, gloss=0.6, iris_color="#d8d0b0", mouth=0.14, mouth_height=-0.3, teeth=True, scariness=0.75,
         tail_shape="forked", tail_length=0.2, tail_spread=1.6,
         dorsal=dict(present=True, shape="triangle", start=0.38, end=0.46, height=0.08),
         dorsal2=dict(present=True, shape="triangle", start=0.72, end=0.78, height=0.06),
@@ -271,7 +271,7 @@ FISH: dict[str, tuple[str, dict]] = {
 OTHERS: dict[str, tuple[str, str, dict]] = {
     # ------------------------------------------------------------------ sharks
     "Tiger shark": ("shark", "requiem", dict(
-        nose=0.95, height=0.28, tail_length=0.34, teeth=True, length_cm=400, scars=0.4,
+        nose=0.95, height=0.28, tail_length=0.34, teeth=True, scariness=0.7, length_cm=400, scars=0.4,
         colors=C(0.1, 0.25, 0.58, pattern="tiger", scale=0.3, accent="#3b352c", fin="#857a68", tail_body=True),
     )),
     "Great white shark": ("shark", "requiem", dict(
@@ -280,12 +280,13 @@ OTHERS: dict[str, tuple[str, str, dict]] = {
         height=0.31, nose=0.95, flat_head=0.25, peak=0.4, peduncle=0.09, tail_spread=1.8, tail_length=0.3,
         tail_shape="lunate",
         dorsal=dict(start=0.39, end=0.55, height=0.24, shape="triangle", sweep=0.55),
-        pectoral_size=0.34, pectoral_droop=0.75, mouth=0.13, mouth_height=-0.62, teeth=True, length_cm=450,
+        pectoral_size=0.34, pectoral_droop=0.75, mouth=0.13, mouth_height=-0.62, teeth=True, scariness=0.9,
+        length_cm=450,
         scars=0.7,
         colors=C(0.57, 0.14, 0.4, belly_level=-0.12, fin="#5f6770", tail_body=True),
     )),
     "Hammerhead shark": ("shark", "hammerhead", dict(
-        hammer=0.14, height=0.25, eye_size=0.2, length_cm=400,
+        hammer=0.14, height=0.25, eye_size=0.2, length_cm=400, teeth=True, scariness=0.35,
         dorsal=dict(height=0.3, shape="falcate", sweep=0.6),
         colors=C(0.12, 0.15, 0.6, fin="#8f8a7c", tail_body=True),
     )),
@@ -293,7 +294,7 @@ OTHERS: dict[str, tuple[str, str, dict]] = {
         # Huge, broad and flat-headed with a wide mouth right at the front, ridges along
         # the flanks, a chequerboard of pale spots and lines, and a big crescent tail.
         height=0.26, thickness=1.2, nose=0.4, peak=0.32, flat_head=0.95, back_arch=0.6, taper=1.1,
-        eye_pos=0.07, eye_size=0.09, eye_height=-0.15, mouth=0.06, mouth_height=-0.15, teeth=False,
+        eye_pos=0.07, eye_size=0.09, eye_height=-0.15, mouth=0.06, mouth_height=-0.15, teeth=False, scariness=0.0,
         tail_length=0.38, tail_spread=1.9, pectoral_size=0.32, swim_amplitude=0.3, tail_shape="lunate",
         dorsal=dict(start=0.5, end=0.66, height=0.15, shape="triangle", sweep=0.6),
         dorsal2=dict(start=0.8, height=0.05), length_cm=1000, scars=0.5,
@@ -303,18 +304,19 @@ OTHERS: dict[str, tuple[str, str, dict]] = {
     "Mako shark": ("shark", "requiem", dict(
         # Slim, with a long needle-pointed snout and a metallic indigo back.
         height=0.22, nose=1.75, flat_head=0.1, peduncle=0.08, tail_spread=1.8, eye_size=0.2, teeth=True,
+        scariness=0.8,
         tail_shape="lunate",
         length_cm=300, gloss=0.45, colors=C(0.62, 0.65, 0.5, fin="#3a4f9a", tail_body=True),
     )),
     "Blacktip reef shark": ("shark", "requiem", dict(
-        height=0.25, nose=1.3, length_cm=150,
+        height=0.25, nose=1.3, length_cm=150, teeth=True, scariness=0.4,
         dorsal=dict(height=0.19, shape="triangle"),
         colors=C(0.1, 0.15, 0.72, fin_tips=0.45, accent="#0b0b0e", fin="#a39d8f", tail_body=True),
     )),
     "Blue shark": ("shark", "requiem", dict(
         # Slender and graceful, with very long scythe pectorals, a long snout and a vivid blue back.
         height=0.2, nose=1.6, flat_head=0.1, peduncle=0.09, tail_spread=1.6, tail_length=0.38, eye_size=0.24,
-        pectoral_size=0.42, pectoral_droop=1.1, length_cm=280, gloss=0.45, teeth=False,
+        pectoral_size=0.29, pectoral_droop=0.85, length_cm=280, gloss=0.45, teeth=False, scariness=0.0,
         dorsal=dict(start=0.42, end=0.54, height=0.15, shape="triangle", sweep=0.6),
         colors=C(0.62, 0.72, 0.62, belly_level=-0.1, fin="#3a5ab8", tail_body=True),
     )),
@@ -323,7 +325,7 @@ OTHERS: dict[str, tuple[str, str, dict]] = {
         # and a long tail with hardly any lower lobe.
         height=0.22, thickness=1.05, nose=0.45, flat_head=0.8, peak=0.3, back_arch=0.55, eye_size=0.1,
         tail_length=0.42, tail_spread=1.1, pectoral_size=0.24, pectoral_droop=0.7, length_cm=250, gloss=0.2,
-        teeth=False, mouth=0.04, mouth_height=-0.5,
+        teeth=False, scariness=0.0, mouth=0.04, mouth_height=-0.5,
         dorsal=dict(start=0.52, end=0.64, height=0.12, shape="rounded", sweep=0.3),
         dorsal2=dict(start=0.7, height=0.09),
         colors=C(0.08, 0.4, 0.48, belly=0.5, belly_level=-0.4, fin="#7a6448", tail_body=True),
@@ -452,20 +454,26 @@ OTHERS: dict[str, tuple[str, str, dict]] = {
     )),
     # ------------------------------------------------------------------ urchins
     "Purple sea urchin": ("urchin", "short", dict(
-        length_cm=7, spines=dict(count=320, length=0.33, sway=0.12),
-        colors=C(0.8, 0.55, 0.45, belly=0.0, fin="#8a4bb0"),
+        # Strongylocentrotus purpuratus: a dense coat of stout purple spines.
+        length_cm=7, spines=dict(count=100, length=0.38, sway=0.1, taper=0.8),
+        colors=C(0.8, 0.55, 0.38, belly=0.0, fin="#8a4bb0"),
     )),
     "Long-spined urchin": ("urchin", "long", dict(
-        length_cm=9, spines=dict(count=200, length=0.9, sway=0.12),
-        colors=C(0.7, 0.2, 0.15, belly=0.0, fin="#25222e"),
+        # Diadema: needle-thin black spines longer than the shell is wide, iridescent blue spots
+        # on the shell and an orange-rimmed anal cone on top.
+        length_cm=9, spines=dict(count=70, length=0.95, sway=0.12, taper=0.95),
+        colors=C(0.7, 0.2, 0.12, belly=0.0, fin="#25222e", pattern="spots", scale=0.35, accent="#3d8be0",
+                 accent2="#e07a2a"),
     )),
     "Red pencil urchin": ("urchin", "short", dict(
-        length_cm=8, spines=dict(count=110, length=0.42, sway=0.06),
-        colors=C(0.02, 0.55, 0.45, belly=0.0, fin="#d0533a"),
+        # Heterocidaris / Heterocentrotus: a few thick, blunt, red pencil spines.
+        length_cm=8, spines=dict(count=34, length=0.5, sway=0.05, taper=0.2),
+        colors=C(0.01, 0.6, 0.4, belly=0.0, fin="#d0533a"),
     )),
     "Green sea urchin": ("urchin", "short", dict(
-        length_cm=6, spines=dict(count=450, length=0.22, sway=0.12),
-        colors=C(0.25, 0.5, 0.45, belly=0.0, fin="#8db04a"),
+        # Strongylocentrotus droebachiensis: short, fine, crowded green spines.
+        length_cm=6, spines=dict(count=130, length=0.26, sway=0.1, taper=0.75),
+        colors=C(0.25, 0.5, 0.4, belly=0.0, fin="#8db04a"),
     )),
 }
 

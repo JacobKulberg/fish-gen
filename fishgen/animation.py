@@ -118,6 +118,7 @@ def smooth_timing(swim_frames: int, turn_frames: int, fps: float, smoothness: fl
 
 
 DEFAULT_SIZE = 64  # sprites are N x N; drawing animals to scale is opt-in
+DEFAULT_SMOOTHNESS = 3.0  # the CLI and GUI render 24 swim and 30 turn frames at 30 fps
 DEFAULT_PX_PER_M = 16.0  # a 1 m animal is 16 px long, a 4.7 m great white 75 px
 MIN_PX = 16  # the smallest animals are drawn at least this long, so there is something to see
 MAX_PX = 128  # and the biggest (whales) get a sprite no bigger than this
@@ -200,10 +201,11 @@ def generate(seed: int, width: int = DEFAULT_SIZE, height: int = DEFAULT_SIZE, s
             done = list(ex.map(renderer.render_with_eyes, all_poses))
     else:
         done = [renderer.render_with_eyes(p) for p in all_poses]
-    frames = [f for f, _ in done]
+    frames = [f for f, _, _ in done]
     palette = None
     if style == "pixel":
-        frames, palette = pixelate(frames, colors, outline, eyes=[e for _, e in done])
+        frames, palette = pixelate(frames, colors, outline, eyes=[e for _, e, _ in done],
+                                   mouths=[m for _, _, m in done])
     i = 0
     for anim in anims.values():
         anim.frames = frames[i:i + len(anim.poses)]

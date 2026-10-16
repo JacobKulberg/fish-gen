@@ -99,7 +99,7 @@ def _shark(seed: int, r: random.Random, variant: str | None) -> FishGenome:
     colors = _colors(hue, sat, val, 1.0, pattern, U(0.2, 0.9), U(0.0, 1.0), accent, _hex(hue, sat * 1.1, val * 0.88),
                      0.4 if tips else 0.0)
     colors.tail_body_color = True  # shark fins are skin, the same colour as the body
-    return _base(
+    g = _base(
         seed, "shark", height=U(0.23, 0.3), thickness=U(0.68, 0.85), peak=U(0.36, 0.42),
         nose=1.0 if hammer else U(0.9, 1.3), taper=U(1.0, 1.25), peduncle=U(0.08, 0.14),
         back_arch=0.62 if hammer else U(0.56, 0.62), flat_head=0.5 if hammer else U(0.15, 0.3),
@@ -117,6 +117,9 @@ def _shark(seed: int, r: random.Random, variant: str | None) -> FishGenome:
         gloss=U(0.25, 0.35), fin_alpha=1.0, scars=U(0.0, 0.6),
         colors=colors,
     )
+    if g.teeth:  # its own stream, so every other gene stays what it was
+        g.scariness = random.Random(f"scary:{seed}").uniform(0.3, 0.7)
+    return g
 
 
 # ---------------------------------------------------------------------------- whales & dolphins
@@ -272,15 +275,16 @@ def _urchin(seed: int, r: random.Random, variant: str | None) -> FishGenome:
                               (U(0.22, 0.3), U(0.4, 0.55), U(0.4, 0.5)), (U(0.65, 0.75), U(0.1, 0.25), U(0.12, 0.18)),
                               (U(0.05, 0.09), U(0.65, 0.8), U(0.55, 0.7)), (U(0.9, 0.96), U(0.4, 0.55), U(0.5, 0.65))])
     if v == "long":
-        spines = SpineGenes(r.randint(160, 240), U(0.75, 1.0), U(0.08, 0.14))
+        spines = SpineGenes(r.randint(50, 80), U(0.75, 1.0), U(0.08, 0.14), U(0.85, 0.95))
     else:
-        spines = SpineGenes(r.randint(220, 420), 0.0, U(0.06, 0.15))
-        spines.length = 0.2 + 0.25 * (1 - (spines.count - 220) / 200) + U(-0.03, 0.03)  # fewer spines, longer
+        spines = SpineGenes(r.randint(60, 150), 0.0, U(0.06, 0.15), U(0.6, 0.85))
+        spines.length = 0.2 + 0.25 * (1 - (spines.count - 60) / 90) + U(-0.03, 0.03)  # fewer spines, longer
     spine = _hex(hue, sat + 0.05, min(1.0, val * 1.6 + 0.05))
+    height = U(0.66, 0.74)  # a flattened dome
     return _base(
-        seed, "urchin", profile="sphere", height=U(0.7, 0.8), thickness=1.0 / 0.75, back_arch=0.55,
+        seed, "urchin", profile="sphere", height=height, thickness=1.0 / height, back_arch=0.6,
         eye_style="none", swim_amplitude=0.0, wave_count=0.0, turn_lag=0.0, camera_tilt=0.25, spines=spines,
-        length_cm=U(8, 11) if v == "long" else U(5, 9), gloss=0.3,
+        length_cm=U(8, 11) if v == "long" else U(5, 9), gloss=0.08,
         colors=_colors(hue, sat, val, 0.0, fin=spine),
     )
 
@@ -358,6 +362,8 @@ def individualise(g: FishGenome, salt: str) -> FishGenome:
         g.scars = clip(g.scars + U(-0.2, 0.3), 0.0, 1.0)  # every big animal has its own scars
     c.fin_color = _jit_hex(c.fin_color, r)
     c.accent_color = _jit_hex(c.accent_color, r)
+    if g.scariness > 0:  # some are meaner than others (a calm species stays calm)
+        g.scariness = clip(g.scariness + U(-0.2, 0.2), 0.1, 1.0)
     return g
 
 

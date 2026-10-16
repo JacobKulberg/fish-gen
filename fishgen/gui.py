@@ -21,8 +21,8 @@ from tkinter import colorchooser, filedialog, messagebox, ttk
 
 from PIL import Image, ImageTk
 
-from .animation import (DEFAULT_PX_PER_M, DEFAULT_SIZE, MAX_PX, MIN_PX, SHOWCASE_ORDER, FishSprite, generate,
-                        smooth_timing)
+from .animation import (DEFAULT_PX_PER_M, DEFAULT_SIZE, DEFAULT_SMOOTHNESS, MAX_PX, MIN_PX, SHOWCASE_ORDER,
+                        FishSprite, generate, smooth_timing)
 from .export import FORMATS, export_all
 from .genome import (ALL_FIN_SHAPES, ALL_PATTERNS, ALL_TAIL_SHAPES, ARCHETYPES, EYE_STYLES, KINDS, LOBE_SHAPES,
                      PECTORAL_SHAPES, WING_SHAPES, FishGenome)
@@ -74,7 +74,8 @@ GENE_TABS: list[tuple[str, list[tuple[str, tuple | None, list[tuple]]]]] = [
             ("Neck", "neck", "float", (0.0, 0.4)),
             ("Throat grooves", "pleats", "bool", None),
         ]),
-        ("Mouth", ("fish", "shark", "whale"), [
+        ("Mouth & scariness", ("fish", "shark", "whale"), [
+            ("Scariness", "scariness", "float", (0.0, 1.0)),
             ("Mouth length", "mouth", "float", (0.0, 0.2)),
             ("Mouth height", "mouth_height", "float", (-0.9, 0.5)),
             ("Teeth", "teeth", "bool", None),
@@ -334,7 +335,7 @@ class FishStudio:
         self.swim_frames = tk.IntVar(value=8)
         self.turn_frames = tk.IntVar(value=10)
         self.fps = tk.DoubleVar(value=10.0)
-        self.smoothness = tk.DoubleVar(value=1.0)
+        self.smoothness = tk.DoubleVar(value=DEFAULT_SMOOTHNESS)
         self.pitch = tk.DoubleVar(value=0.25)
         self.scale_by_size = tk.BooleanVar(value=False)
         # Export

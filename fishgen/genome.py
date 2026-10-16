@@ -76,6 +76,7 @@ class SpineGenes:
     count: int = 0
     length: float = 0.35  # relative to body length
     sway: float = 0.15  # radians of spine wobble
+    taper: float = 0.85  # how much a spine narrows to its tip: 0 = blunt pencils .. 1 = needles
 
 
 @dataclass
@@ -155,6 +156,7 @@ class FishGenome:
     mouth: float = 0.0  # mouth length drawn on the head (0 = none)
     mouth_height: float = -0.35  # where the mouth sits on the head (-1 belly .. 1 back)
     teeth: bool = False
+    scariness: float = 0.0  # 0 = as nature made it .. 1 = jaws agape and full of teeth, a glowering eye
     lobes: str = "none"  # one of LOBE_SHAPES
     lobe_length: float = 0.0
     puff: float = 0.0  # pufferfish: how much it inflates when it puffs up (0 = can't)
