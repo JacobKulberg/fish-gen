@@ -207,8 +207,11 @@ class FishModel:
         a = np.clip(p[..., 0], 0.0, 1.0)
         if g.puff and inflate > 0:
             # Every cross-section swells towards a ball; fins ride out on the swelling surface.
+            # The ball closes just behind the snout tip, so the face stays round with the
+            # mouth poking out a little, instead of the whole front swelling into a flat wall.
             k = inflate * np.clip((1.0 - a) / 0.2, 0.0, 1.0)
-            target = 0.5 * g.puff * np.sqrt(np.clip(1.0 - ((a - 0.47) / 0.56) ** 2, 0.02, 1.0))
+            ball = np.sqrt(np.clip(1.0 - ((a - 0.53) / 0.5) ** 2, 0.0, 1.0))
+            target = 0.5 * g.puff * ball
 
             def grow(c, surf):
                 surf = np.maximum(surf, 1e-4)

@@ -147,15 +147,17 @@ class FishSprite:
 
 def generate(seed: int, width: int = 32, height: int = 32, swim_frames: int = 8, turn_frames: int = 10,
              fps: float = 10.0, pitch: float = 0.25, genome: FishGenome | None = None,
-             scale_by_size: bool = True, px_per_m: float = DEFAULT_PX_PER_M, min_px: int = MIN_PX,
+             scale_by_size: bool = False, px_per_m: float = DEFAULT_PX_PER_M, min_px: int = MIN_PX,
              max_px: int = MAX_PX, style: str = "pixel", colors: int | None = None, outline: bool = True,
              threads: int | None = None) -> FishSprite:
     """Render every animation of an animal.
 
-    With ``scale_by_size`` (the default) the animal is drawn at its real size, ``px_per_m``
-    pixels to the metre, on a canvas just big enough for every frame, so animals put side by
-    side are to scale. Small animals are still drawn ``min_px`` long, and the biggest are
-    shrunk to fit a ``max_px`` canvas. Otherwise it is fitted into a ``width`` x ``height`` canvas.
+    By default the animal is fitted into a ``width`` x ``height`` canvas (32 x 32).
+
+    With ``scale_by_size`` it is drawn at its real size instead, ``px_per_m`` pixels to the
+    metre, on a canvas just big enough for every frame, so animals put side by side are to
+    scale. Small animals are still drawn ``min_px`` long, and the biggest are shrunk to fit a
+    ``max_px`` canvas.
 
     ``style`` "pixel" (the default) turns the renders into pixel art: hard edges, one palette
     of ``colors`` colours (None = chosen for the size) shared by every frame, and an outline.

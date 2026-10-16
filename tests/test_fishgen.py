@@ -161,15 +161,52 @@ def test_parse_size():
 
 def test_cli_exports_everything(tmp_path):
     assert main(["generate", "--seed", "5", "--size", "24", "--out", str(tmp_path), "--flat"]) == 0
-    data = json.loads((tmp_path / "fish_5.json").read_text())
+    data = json.loads((tmp_path / "fish_24px_5.json").read_text())
     assert set(data["animations"]) == {n for n in SHOWCASE_ORDER if not n.startswith("puff")}
     assert data["meta"]["frame_size"] == [24, 24]
-    tres = (tmp_path / "fish_5.tres").read_text()
+    tres = (tmp_path / "fish_24px_5.tres").read_text()
     assert tres.startswith('[gd_resource type="SpriteFrames"')
     assert tres.count("[sub_resource") == sum(len(a["frames"]) for a in data["animations"].values())
-    assert (tmp_path / "fish_5.png").exists()
+    assert (tmp_path / "fish_24px_5.png").exists()
     assert (tmp_path / "gif" / "showcase.gif").exists()
     assert len(list((tmp_path / "frames").rglob("*.png"))) == tres.count("[sub_resource")
+
+
+def test_species_names_are_forgiving():
+    import argparse
+
+    from fishgen.cli import parse_species
+
+    assert parse_species("neon-tetra") == parse_species("NEON_TETRA") == "Neon tetra"
+    assert parse_species("great white") == "Great white shark"
+    with pytest.raises(argparse.ArgumentTypeError, match="Yellow tang, Blue tang"):
+        parse_species("tang")
+
+
+def test_sprite_command_makes_a_square_sprite(tmp_path):
+    """``fishgen sprite NAME SIZE`` is the quick way to one N x N sprite of a species."""
+    assert main(["sprite", "neon-tetra", "24", "--seed", "3", "--swim-frames", "2", "--turn-frames", "2",
+                 "--out", str(tmp_path)]) == 0
+    out = tmp_path / "neon_tetra_24px_3"
+    data = json.loads((out / "neon_tetra_24px_3.json").read_text())
+    assert data["meta"]["frame_size"] == [24, 24]
+    assert (out / "gif" / "showcase.gif").exists() and not (out / "frames").exists()
+    # Without a size it is 32 x 32, and every animal gets the same canvas, not drawn to scale.
+    assert main(["sprite", "Humpback whale", "--seed", "1", "--swim-frames", "2", "--turn-frames", "2",
+                 "--formats", "sheet", "--out", str(tmp_path)]) == 0
+    whale = json.loads((tmp_path / "humpback_whale_32px_1" / "humpback_whale_32px_1.json").read_text())
+    assert whale["meta"]["frame_size"] == [32, 32]
+
+
+def test_neon_tetra_tail_reads_in_pixel_art():
+    """The real tail is nearly clear; the sprite still needs a visible forked tail at 32 px."""
+    from fishgen.species import make_genome
+
+    s = generate(1, 32, 32, genome=make_genome("Neon tetra", 1), swim_frames=4, turn_frames=2)
+    for f in s.animations["swim_right"].frames:
+        a = f[..., 3] > 0
+        back = np.where(a.any(0))[0][0]
+        assert a[:, back:back + 3].any(1).sum() >= 6
 
 
 def test_species_presets_render():
@@ -283,7 +320,7 @@ def test_cli_kind_option(tmp_path):
     assert main(["generate", "--kind", "octopus", "--seed", "3", "--size", "24", "--swim-frames", "2",
                  "--turn-frames", "2", "--out", str(tmp_path),
                  "--formats", "sheet"]) == 0
-    data = json.loads((tmp_path / "octopus_3" / "octopus_3.json").read_text())
+    data = json.loads((tmp_path / "octopus_24px_3" / "octopus_24px_3.json").read_text())
     assert data["genome"]["kind"] == "octopus"
     with pytest.raises(SystemExit):
         main(["generate", "--kind", "shark", "--species", "Orca", "--out", str(tmp_path)])
@@ -318,12 +355,12 @@ def test_animals_are_drawn_to_scale():
     assert px_per_unit(g) * FishModel(g, detail=24).real_extent() == pytest.approx(
         min(128, max(16, g.length_cm / 100 * 16)))
     # Whales are shrunk to fit the biggest sprite, 128 px.
-    whale = generate(1, genome=make_genome("Humpback whale", 1), swim_frames=2, turn_frames=2)
+    whale = generate(1, genome=make_genome("Humpback whale", 1), scale_by_size=True, swim_frames=2, turn_frames=2)
     assert max(whale.size) <= 128 and max(whale.size) >= 120
     # Tiny animals stop at the minimum size; the canvas fits the animal, not a fixed square.
     tetra = make_genome("Neon tetra", 1)
     assert px_per_unit(tetra, 100.0, min_px=16) * FishModel(tetra, detail=24).real_extent() == pytest.approx(16)
-    s = generate(1, genome=make_genome("Koi", 1), px_per_m=40.0, swim_frames=2, turn_frames=2)
+    s = generate(1, genome=make_genome("Koi", 1), scale_by_size=True, px_per_m=40.0, swim_frames=2, turn_frames=2)
     w, h = s.size
     assert w > h and 20 < w < 60
     assert generate(1, 32, 32, genome=make_genome("Great white shark", 1), scale_by_size=False,
@@ -378,7 +415,7 @@ def test_rays_show_their_pale_underside_on_the_upstroke():
 def test_morph_option_on_the_command_line(tmp_path):
     assert main(["generate", "--species", "Koi", "--morph", "Ogon", "--seed", "2", "--size", "24",
                  "--swim-frames", "2", "--turn-frames", "2", "--formats", "sheet", "--out", str(tmp_path)]) == 0
-    data = json.loads((tmp_path / "fish_2" / "fish_2.json").read_text())
+    data = json.loads((tmp_path / "koi_24px_2" / "koi_24px_2.json").read_text())
     assert data["genome"]["morph"] == "Ogon"
     with pytest.raises(SystemExit):
         main(["generate", "--species", "Koi", "--morph", "Tabby", "--out", str(tmp_path)])
@@ -398,6 +435,10 @@ def test_pufferfish_puffs_up_with_spikes():
     calm = opaque(puff.frames[0]).sum()
     big = max(opaque(f).sum() for f in puff.frames)
     assert big > 2 * calm
+    # The face stays round when puffed, not a flat wall across the front.
+    a = opaque(max(puff.frames, key=lambda f: opaque(f).sum()))
+    cols, rows = np.where(a.any(0))[0], np.where(a.any(1))[0]
+    assert a[:, cols[-3]:].any(1).sum() < 0.45 * len(rows)
     model = FishModel(g)
     assert len(model._spine_lines(0.0, 0.0)) == 0 and len(model._spine_lines(0.0, 1.0)) == g.puff_spines
     # Other fish don't puff.

@@ -245,12 +245,48 @@ class ScrollFrame(ttk.Frame):
         bar.pack(side="right", fill="y")
         self.inner.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         self.canvas.bind("<Configure>", lambda e: self.canvas.itemconfigure(self._win, width=e.width))
-        self.bind("<Enter>", lambda e: self.bind_all("<MouseWheel>", self._wheel))
-        self.bind("<Leave>", lambda e: self.unbind_all("<MouseWheel>"))
+        _install_wheel(self.winfo_toplevel())
 
-    def _wheel(self, event):
+    def scroll(self, steps: int):
         if self.inner.winfo_height() > self.canvas.winfo_height():
-            self.canvas.yview_scroll(int(-event.delta / 120) or (-1 if event.delta > 0 else 1), "units")
+            self.canvas.yview_scroll(steps, "units")
+
+
+def _install_wheel(root: tk.Misc):
+    """One app-wide wheel handler that scrolls whichever ScrollFrame is under the pointer.
+
+    Windows and macOS (and Tk 8.7+) send <MouseWheel>; Tk 8.6 on Linux sends <Button-4>/<Button-5>
+    instead. Binding per frame on <Enter>/<Leave> doesn't work either: moving onto a child widget
+    "leaves" the frame. Comboboxes and spinboxes would otherwise change value as the page scrolls
+    past them, so they leave the wheel to the page.
+    """
+    if getattr(root, "_fishgen_wheel", False):
+        return
+    root._fishgen_wheel = True
+
+    def wheel(event):
+        if event.num == 4:
+            steps = -1
+        elif event.num == 5:
+            steps = 1
+        elif event.delta:
+            # Windows: multiples of 120; macOS: small counts.
+            steps = -(event.delta // 120 if abs(event.delta) >= 120 else (1 if event.delta > 0 else -1))
+        else:
+            return
+        try:
+            w = root.winfo_containing(event.x_root, event.y_root)
+        except (KeyError, tk.TclError):  # e.g. over a combobox drop-down list
+            return
+        while w is not None and not isinstance(w, ScrollFrame):
+            w = w.master
+        if w is not None:
+            w.scroll(steps)
+
+    for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+        root.bind_all(seq, wheel, add="+")
+        for cls in ("TCombobox", "TSpinbox"):
+            root.unbind_class(cls, seq)
 
 
 class FishStudio:
@@ -285,8 +321,8 @@ class FishStudio:
         self.morph = tk.StringVar(value=ANY)
         self.seed = tk.IntVar(value=seed if seed is not None else random.randrange(1_000_000))
         # Sprite settings
-        self.width = tk.IntVar(value=64)
-        self.height = tk.IntVar(value=64)
+        self.width = tk.IntVar(value=32)
+        self.height = tk.IntVar(value=32)
         self.px_per_m = tk.DoubleVar(value=DEFAULT_PX_PER_M)
         self.min_px = tk.IntVar(value=MIN_PX)
         self.max_px = tk.IntVar(value=MAX_PX)
@@ -297,7 +333,7 @@ class FishStudio:
         self.turn_frames = tk.IntVar(value=10)
         self.fps = tk.DoubleVar(value=10.0)
         self.pitch = tk.DoubleVar(value=0.25)
-        self.scale_by_size = tk.BooleanVar(value=True)
+        self.scale_by_size = tk.BooleanVar(value=False)
         # Export
         self.name = tk.StringVar()
         self.out_dir = tk.StringVar(value=str(out.resolve()))
@@ -391,12 +427,33 @@ class FishStudio:
             .grid(row=4, column=1, sticky="ew", pady=3)
         ttk.Button(box, text="Random seed", command=self.random_seed).grid(row=4, column=2, sticky="ew", padx=(6, 0))
 
+        # Sprite size right here, since an N x N sprite of this animal is what most people are after.
+        ttk.Label(box, text="Size").grid(row=5, column=0, sticky="w", padx=(0, 8), pady=3)
+        sizes = ttk.Frame(box)
+        sizes.grid(row=5, column=1, columnspan=2, sticky="w", pady=3)
+        self.size_label = ttk.Label(sizes, width=9)
+        for n in (16, 24, 32, 48, 64, 96, 128):
+            ttk.Button(sizes, text=str(n), width=4,
+                       command=lambda n=n: (self.width.set(n), self.height.set(n), self.scale_by_size.set(False))) \
+                .pack(side="left", padx=(0, 2))
+        self.size_label.pack(side="left", padx=(4, 0))
+        for v in (self.width, self.height, self.scale_by_size):
+            v.trace_add("write", lambda *_: self._show_size())
+        self._show_size()
+
         btns = ttk.Frame(box)
-        btns.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(6, 0))
+        btns.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(6, 0))
         ttk.Button(btns, text="Surprise me", command=self.surprise).pack(side="left")
         ttk.Button(btns, text="Undo my tweaks", command=self.load_type).pack(side="left", padx=6)
         ttk.Label(box, text="Kind + species + seed = same animal. Tweaks below go on top.",
-                  foreground="#666").grid(row=6, column=0, columnspan=3, sticky="w", pady=(6, 0))
+                  foreground="#666").grid(row=7, column=0, columnspan=3, sticky="w", pady=(6, 0))
+
+    def _show_size(self):
+        try:
+            text = "to scale" if self.scale_by_size.get() else f"{self.width.get()}x{self.height.get()}"
+        except tk.TclError:  # a half-typed number
+            return
+        self.size_label.configure(text=text)
 
     def _section(self, parent, row: int, title: str) -> int:
         ttk.Label(parent, text=title, style="Section.TLabel").grid(
@@ -529,25 +586,25 @@ class FishStudio:
             .grid(row=row + 2, column=0, columnspan=3, sticky="w", padx=8, pady=(0, 4))
 
         row = self._section(p, row + 3, "Size")
-        ttk.Radiobutton(p, text="To scale: animals sized by their real length", variable=self.scale_by_size,
-                        value=True).grid(row=row, column=0, columnspan=3, sticky="w", padx=8)
-        ttk.Label(p, text="Pixels per metre").grid(row=row + 1, column=0, sticky="w", padx=(8, 10), pady=3)
-        ttk.Spinbox(p, textvariable=self.px_per_m, from_=1, to=2000, increment=2, width=8) \
-            .grid(row=row + 1, column=1, sticky="w", pady=3)
-        ttk.Label(p, text=f"{DEFAULT_PX_PER_M:g}: a great white is ~75px", foreground="#666") \
-            .grid(row=row + 1, column=2, sticky="w")
-        self._int_row(p, row + 2, "Smallest (px)", self.min_px, 4, 2048, "small fish are drawn at least this long")
-        self._int_row(p, row + 3, "Largest (px)", self.max_px, 8, 2048, "whales are shrunk to fit a sprite this big")
-        ttk.Radiobutton(p, text="Fixed canvas: every animal fitted into it", variable=self.scale_by_size,
-                        value=False).grid(row=row + 4, column=0, columnspan=3, sticky="w", padx=8, pady=(8, 0))
-        self._int_row(p, row + 5, "Width (px)", self.width, 8, 2048)
-        self._int_row(p, row + 6, "Height (px)", self.height, 8, 2048)
+        ttk.Radiobutton(p, text="Fixed canvas: the animal is fitted into it", variable=self.scale_by_size,
+                        value=False).grid(row=row, column=0, columnspan=3, sticky="w", padx=8)
+        self._int_row(p, row + 1, "Width (px)", self.width, 8, 2048)
+        self._int_row(p, row + 2, "Height (px)", self.height, 8, 2048)
         sizes = ttk.Frame(p)
-        sizes.grid(row=row + 7, column=0, columnspan=3, sticky="w", padx=8, pady=(2, 0))
+        sizes.grid(row=row + 3, column=0, columnspan=3, sticky="w", padx=8, pady=(2, 0))
         for n in (16, 24, 32, 48, 64, 96, 128, 256):
             ttk.Button(sizes, text=str(n), width=4,
                        command=lambda n=n: (self.width.set(n), self.height.set(n), self.scale_by_size.set(False))) \
                 .pack(side="left", padx=(0, 3))
+        ttk.Radiobutton(p, text="To scale: animals sized by their real length", variable=self.scale_by_size,
+                        value=True).grid(row=row + 4, column=0, columnspan=3, sticky="w", padx=8, pady=(8, 0))
+        ttk.Label(p, text="Pixels per metre").grid(row=row + 5, column=0, sticky="w", padx=(8, 10), pady=3)
+        ttk.Spinbox(p, textvariable=self.px_per_m, from_=1, to=2000, increment=2, width=8) \
+            .grid(row=row + 5, column=1, sticky="w", pady=3)
+        ttk.Label(p, text=f"{DEFAULT_PX_PER_M:g}: a great white is ~75px", foreground="#666") \
+            .grid(row=row + 5, column=2, sticky="w")
+        self._int_row(p, row + 6, "Smallest (px)", self.min_px, 4, 2048, "small fish are drawn at least this long")
+        self._int_row(p, row + 7, "Largest (px)", self.max_px, 8, 2048, "whales are shrunk to fit a sprite this big")
         row += 1
         row = self._section(p, row + 7, "Animation")
         self._int_row(p, row, "Swim frames", self.swim_frames, 2, 48, "per tail beat")

@@ -1,7 +1,7 @@
 """Live aquarium preview (pygame-ce).
 
-Fish swim back and forth and play their turn-around when they reach a wall. Animals
-are drawn to scale with each other by default, so a shark dwarfs the reef fish around it.
+Fish swim back and forth and play their turn-around when they reach a wall. With
+``--to-scale`` animals are drawn to scale with each other, so a shark dwarfs the reef fish.
 Turns are only triggered at the end of a swim cycle, which is exactly the
 hand-off point the animations are designed for - the same rule a game should use.
 """

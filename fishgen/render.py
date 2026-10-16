@@ -846,7 +846,8 @@ class FishRenderer:
             col = _mix(col, col * 0.62, ray * 0.6)
             # A milky, darker root and a paler, thinner outer edge.
             col = _mix(col, col * 0.75, smoothstep(0.25, 0.0, r) * 0.5)
-            alpha = g.fin_alpha * (0.85 + 0.15 * smoothstep(0.4, 0.0, r)) + (1 - g.fin_alpha) * ray * 0.6
+            fa_ = np.where(pm == CAUDAL, g.tail_alpha, g.fin_alpha) if g.tail_alpha is not None else g.fin_alpha
+            alpha = fa_ * (0.85 + 0.15 * smoothstep(0.4, 0.0, r)) + (1 - fa_) * ray * 0.6
             alpha *= 1.0 - 0.35 * smoothstep(0.75, 1.0, r)
             alpha = np.clip(alpha, 0.15, 1.0)
         if c.pattern_on_fins:

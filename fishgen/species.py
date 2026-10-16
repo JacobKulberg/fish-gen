@@ -137,12 +137,14 @@ FISH: dict[str, tuple[str, dict]] = {
     )),
     "Neon tetra": ("torpedo", dict(
         # Electric blue stripe from the eye to the tail over a red lower rear half; see-through fins.
-        length_cm=3.5, height=0.28, tail_shape="forked", eye_size=0.34, scales=0.03, fin_alpha=0.3,
-        iris_color="#b8c8d8",
+        # The real tail is nearly clear, which vanishes in pixel art, so it is drawn a bit bigger and
+        # more solid than life (its own alpha) to keep the forked tail readable at 16-32 px.
+        length_cm=3.5, height=0.28, tail_shape="forked", tail_length=0.3, tail_spread=1.6, eye_size=0.34,
+        scales=0.03, fin_alpha=0.3, tail_alpha=0.8, iris_color="#b8c8d8",
         dorsal=dict(present=True, shape="triangle", start=0.42, end=0.54, height=0.08, sweep=0.5),
         anal=dict(present=True, shape="long", start=0.6, end=0.85, height=0.06),
         colors=C(0.58, 0.45, 0.38, belly=0.9, belly_level=-0.15, pattern="neon", accent="#3fe8ff",
-                 accent2="#e8283c", fin="#c7d2dc"),
+                 accent2="#e8283c", fin="#c7d2dc", tail="#9aa8b8"),
     )),
     "Koi": ("torpedo", dict(
         length_cm=60, height=0.3, tail_shape="rounded", pectoral_size=0.18, scales=0.03, silver=0.15,
