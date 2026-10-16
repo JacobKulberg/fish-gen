@@ -8,13 +8,10 @@ import sys
 import time
 from pathlib import Path
 
-from .animation import DEFAULT_PX_PER_M, MAX_PX, MIN_PX, STYLES, generate
+from .animation import DEFAULT_PX_PER_M, DEFAULT_SIZE, MAX_PX, MIN_PX, STYLES, generate
 from .export import FORMATS, export_all
 from .genome import KINDS
 from .species import RANDOM, SPECIES_NAMES, genome_for, kind_of, make_genome, morphs_of
-
-DEFAULT_SIZE = 32  # sprites are N x N; drawing animals to scale is opt-in (--to-scale)
-
 
 def parse_size(text: str) -> tuple[int, int]:
     """'32' -> (32, 32); '48x32' -> (48, 32)."""
@@ -87,6 +84,9 @@ def _add_render_args(p: argparse.ArgumentParser):
     p.add_argument("--swim-frames", type=int, default=8, help="frames per swim cycle (default 8)")
     p.add_argument("--turn-frames", type=int, default=10, help="frames per turn-around (default 10)")
     p.add_argument("--fps", type=float, default=10.0, help="playback speed (default 10)")
+    p.add_argument("--smoothness", "-x", type=float, default=1.0, metavar="X",
+                   help="multiply swim frames, turn frames and fps together: 3 = three times as smooth, "
+                        "same speed (default 1)")
     p.add_argument("--pitch", type=float, default=0.25, help="camera tilt in radians (default 0.25)")
 
 
@@ -118,7 +118,10 @@ def render_opts(args) -> dict:
     fixed = None if args.to_scale else args.size
     if args.colors is not None and not 2 <= args.colors <= 256:
         raise SystemExit("--colors must be between 2 and 256")
-    opts = dict(swim_frames=args.swim_frames, turn_frames=args.turn_frames, fps=args.fps, pitch=args.pitch,
+    if args.smoothness <= 0:
+        raise SystemExit("--smoothness must be above 0")
+    opts = dict(swim_frames=args.swim_frames, turn_frames=args.turn_frames, fps=args.fps,
+                smoothness=args.smoothness, pitch=args.pitch,
                 scale_by_size=fixed is None, px_per_m=args.px_per_m, min_px=args.min_px, max_px=args.max_px,
                 style=args.style, colors=args.colors, outline=args.outline)
     if fixed:
@@ -127,7 +130,7 @@ def render_opts(args) -> dict:
 
 
 def _stem(args, genome, seed: int) -> str:
-    """out/neon_tetra_32px_7 for a species, out/fish_32px_7 for a random animal."""
+    """out/neon_tetra_64px_7 for a species, out/fish_64px_7 for a random animal."""
     base = _norm_stem(args.species) if args.species not in (None, RANDOM) else genome.kind
     size = "scale" if args.to_scale else (f"{args.size[0]}px" if args.size[0] == args.size[1]
                                           else f"{args.size[0]}x{args.size[1]}")
@@ -158,7 +161,7 @@ def cmd_generate(args) -> int:
 
 
 def cmd_sprite(args) -> int:
-    """``fishgen sprite "neon tetra" 32``: the quick way to one N x N sprite of one species."""
+    """``fishgen sprite "neon tetra" 64``: the quick way to one N x N sprite of one species."""
     args.species = args.name
     args.size = args.pixels or args.size
     return cmd_generate(args)
@@ -201,7 +204,7 @@ def main(argv: list[str] | None = None) -> int:
     _add_export_args(g)
     g.set_defaults(func=cmd_generate)
 
-    sp = sub.add_parser("sprite", help="quick: one NxN sprite of a species, e.g. fishgen sprite 'neon tetra' 32")
+    sp = sub.add_parser("sprite", help="quick: one NxN sprite of a species, e.g. fishgen sprite 'neon tetra' 64")
     sp.add_argument("name", type=parse_species, metavar="SPECIES",
                     help="species preset; case, spaces and hyphens don't matter (neon-tetra, \"Great white\")")
     sp.add_argument("pixels", type=parse_size, nargs="?", default=None, metavar="SIZE",

@@ -21,7 +21,8 @@ from tkinter import colorchooser, filedialog, messagebox, ttk
 
 from PIL import Image, ImageTk
 
-from .animation import DEFAULT_PX_PER_M, MAX_PX, MIN_PX, SHOWCASE_ORDER, FishSprite, generate
+from .animation import (DEFAULT_PX_PER_M, DEFAULT_SIZE, MAX_PX, MIN_PX, SHOWCASE_ORDER, FishSprite, generate,
+                        smooth_timing)
 from .export import FORMATS, export_all
 from .genome import (ALL_FIN_SHAPES, ALL_PATTERNS, ALL_TAIL_SHAPES, ARCHETYPES, EYE_STYLES, KINDS, LOBE_SHAPES,
                      PECTORAL_SHAPES, WING_SHAPES, FishGenome)
@@ -321,8 +322,8 @@ class FishStudio:
         self.morph = tk.StringVar(value=ANY)
         self.seed = tk.IntVar(value=seed if seed is not None else random.randrange(1_000_000))
         # Sprite settings
-        self.width = tk.IntVar(value=32)
-        self.height = tk.IntVar(value=32)
+        self.width = tk.IntVar(value=DEFAULT_SIZE)
+        self.height = tk.IntVar(value=DEFAULT_SIZE)
         self.px_per_m = tk.DoubleVar(value=DEFAULT_PX_PER_M)
         self.min_px = tk.IntVar(value=MIN_PX)
         self.max_px = tk.IntVar(value=MAX_PX)
@@ -332,6 +333,7 @@ class FishStudio:
         self.swim_frames = tk.IntVar(value=8)
         self.turn_frames = tk.IntVar(value=10)
         self.fps = tk.DoubleVar(value=10.0)
+        self.smoothness = tk.DoubleVar(value=1.0)
         self.pitch = tk.DoubleVar(value=0.25)
         self.scale_by_size = tk.BooleanVar(value=False)
         # Export
@@ -356,7 +358,8 @@ class FishStudio:
         self.kind.trace_add("write", lambda *_: self._kind_changed())
         for v in (self.species, self.archetype, self.seed, self.morph):
             v.trace_add("write", lambda *_: self._type_changed())
-        for v in (self.width, self.height, self.swim_frames, self.turn_frames, self.fps, self.pitch, self.scale_by_size,
+        for v in (self.width, self.height, self.swim_frames, self.turn_frames, self.fps, self.smoothness, self.pitch,
+                  self.scale_by_size,
                   self.px_per_m, self.min_px, self.max_px, self.pixel_art, self.colors, self.outline):
             v.trace_add("write", lambda *_: self.request_render())
         for v in (self.anim, self.zoom, self.background):
@@ -610,11 +613,33 @@ class FishStudio:
         self._int_row(p, row, "Swim frames", self.swim_frames, 2, 48, "per tail beat")
         self._int_row(p, row + 1, "Turn frames", self.turn_frames, 2, 64, "per turn-around")
         self._int_row(p, row + 2, "Frames / sec", self.fps, 1, 60)
-        row = self._section(p, row + 3, "Camera")
+        # One knob for "N times as smooth": multiplies all three above, so the speed stays the same.
+        ttk.Label(p, text="Smoothness").grid(row=row + 3, column=0, sticky="w", padx=(8, 10), pady=3)
+        ttk.Spinbox(p, textvariable=self.smoothness, from_=0.25, to=8, increment=0.5, width=8) \
+            .grid(row=row + 3, column=1, sticky="w", pady=3)
+        quick = ttk.Frame(p)
+        quick.grid(row=row + 4, column=0, columnspan=3, sticky="w", padx=8, pady=(2, 0))
+        for n in (1, 2, 3, 4):
+            ttk.Button(quick, text=f"{n}x", width=4, command=lambda n=n: self.smoothness.set(n)) \
+                .pack(side="left", padx=(0, 3))
+        self.timing_label = ttk.Label(quick, foreground="#666")
+        self.timing_label.pack(side="left", padx=(6, 0))
+        for v in (self.swim_frames, self.turn_frames, self.fps, self.smoothness):
+            v.trace_add("write", lambda *_: self._show_timing())
+        self._show_timing()
+        row = self._section(p, row + 5, "Camera")
         p.columnconfigure(1, weight=1)
         self._slider(p, row, "Tilt", self.pitch, 0.0, 0.8)
         ttk.Label(p, text="Higher tilt shows more of the fish's back.", foreground="#666") \
             .grid(row=row + 1, column=0, columnspan=3, sticky="w", padx=8)
+
+    def _show_timing(self):
+        try:
+            swim, turn, fps = smooth_timing(int(self.swim_frames.get()), int(self.turn_frames.get()),
+                                            float(self.fps.get()), float(self.smoothness.get()))
+        except (tk.TclError, ValueError, ZeroDivisionError):  # a half-typed number
+            return
+        self.timing_label.configure(text=f"= {swim} swim, {turn} turn frames at {fps:.4g} fps")
 
     def _build_export_tab(self, p):
         p.columnconfigure(1, weight=1)
@@ -801,7 +826,8 @@ class FishStudio:
         try:
             opts = dict(width=int(self.width.get()), height=int(self.height.get()),
                         swim_frames=int(self.swim_frames.get()), turn_frames=int(self.turn_frames.get()),
-                        fps=float(self.fps.get()), pitch=float(self.pitch.get()),
+                        fps=float(self.fps.get()), smoothness=float(self.smoothness.get()),
+                        pitch=float(self.pitch.get()),
                         scale_by_size=bool(self.scale_by_size.get()), px_per_m=float(self.px_per_m.get()),
                         min_px=int(self.min_px.get()), max_px=int(self.max_px.get()),
                         style="pixel" if self.pixel_art.get() else "smooth", colors=int(self.colors.get()) or None,
@@ -816,8 +842,8 @@ class FishStudio:
             raise ValueError("Size must be between 8 and 2048 pixels")
         if opts["px_per_m"] <= 0 or opts["min_px"] < 1:
             raise ValueError("Pixels per metre and the smallest size must be above 0")
-        if opts["swim_frames"] < 2 or opts["turn_frames"] < 2 or opts["fps"] <= 0:
-            raise ValueError("Need at least 2 frames per animation and fps above 0")
+        if opts["swim_frames"] < 2 or opts["turn_frames"] < 2 or opts["fps"] <= 0 or opts["smoothness"] <= 0:
+            raise ValueError("Need at least 2 frames per animation, and fps and smoothness above 0")
         return opts
 
     def request_render(self):

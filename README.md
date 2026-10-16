@@ -24,7 +24,7 @@ a scene where a clownfish is a speck next to a humpback, `--to-scale` draws them
 Export as GIFs, a sprite sheet + JSON, loose PNG frames, or a Godot 4 `SpriteFrames` resource.
 
 ```sh
-fishgen sprite "neon tetra" 32      # -> out/neon_tetra_32px_<seed>/  (sheet + JSON + GIFs)
+fishgen sprite "neon tetra" 64      # -> out/neon_tetra_64px_<seed>/  (sheet + JSON + GIFs)
 ```
 
 - 🎲 **Infinite variety** - same seed, same fish; a new seed, a new fish
@@ -62,7 +62,7 @@ choose), edges are made hard, lone stray pixels are merged away, small eyes get 
 pixel, and a selective outline - a dark shade of whatever colour it borders - goes round the
 silhouette (`--no-outline` to drop it). `--style smooth` keeps the full-colour renders instead.
 
-**Sizes.** Every sprite is 32x32 unless you say otherwise: `--size 16` (or `64`, `96`, `128`,
+**Sizes.** Every sprite is 64x64 unless you say otherwise: `--size 16` (or `32`, `96`, `128`,
 `48x32`...) fits the animal into that canvas. With `--to-scale`, animals are drawn **to scale**
 instead: each carries its real adult length
 (`length_cm`, varying from one individual to the next; rays are measured across the wings,
@@ -101,9 +101,9 @@ That's it. The first run creates `.venv` and installs numpy + Pillow by itself.
 
 Pick a **kind** of animal first, then a **species** of that kind (or *Random* for a random
 animal of that kind), then tweak anything on the tabs - body shape, eye, fins, wings and arms,
-colours and pattern, skin (silver sheen, gloss, scales, scars), length, frame counts, and on
+colours and pattern, skin (silver sheen, gloss, scales, scars), length, frame counts and a *Smoothness* multiplier (1x-4x), and on
 the *Sprite* tab pixel art or smooth, palette size, outline, and a fixed canvas or to scale.
-The sprite size (16 to 128 px, 32 by default) is picked with one click right under the species. Species with colour varieties get a *Variety* box. Only the controls that apply to the chosen
+The sprite size (16 to 128 px, 64 by default) is picked with one click right under the species. Species with colour varieties get a *Variety* box. Only the controls that apply to the chosen
 kind are shown. The animal re-renders live on the right.
 
 The kind is always decided first and every gene is then drawn to suit it, so a random shark
@@ -146,14 +146,15 @@ pip install -e ".[preview,dev]"
 
 ```sh
 fishgen                                         # opens the designer window
-fishgen sprite clownfish                        # a 32x32 clownfish: sheet + JSON + GIFs
-fishgen sprite "neon tetra" 64                  # a 64x64 neon tetra (case, spaces, hyphens don't matter)
+fishgen sprite clownfish                        # a 64x64 clownfish: sheet + JSON + GIFs
+fishgen sprite "neon tetra" 32                  # a 32x32 neon tetra (case, spaces, hyphens don't matter)
 fishgen sprite great-white 128x64 --seed 3      # any WxH, a particular individual
-fishgen generate --seed 42                      # a random fish, all formats into ./out/fish_32px_42/
+fishgen generate --seed 42                      # a random fish, all formats into ./out/fish_64px_42/
 fishgen generate --species Clownfish --count 5  # five different clownfish
 fishgen generate --species "Tiger shark" --to-scale   # to scale: ~70px long
 fishgen generate --species Koi --morph Showa    # pick the colour variety
 fishgen generate --species Pufferfish           # includes the puff-up animations
+fishgen sprite koi -x 3                         # 3x smoother: 24 swim / 30 turn frames at 30 fps
 fishgen generate --kind ray --count 4           # four random rays: ./out/ray_<seed>/
 fishgen generate --kind whale --size 96         # fitted to a 96x96 sprite
 fishgen generate --count 20 --size 16 --out fish    # 20 fish, each a 16x16 sprite
@@ -175,7 +176,7 @@ and writes the sprite sheet, JSON and GIFs (`--formats all` for the rest).
 | `--kind KIND` | fish | `fish`, `shark`, `whale`, `ray`, `squid`, `octopus` or `urchin`: a random animal of that kind |
 | `--species NAME` | random | preset (implies its kind; also works with `preview` and `gui`); case, spaces and hyphens don't matter, and a unique part is enough (`hammer`) |
 | `--morph NAME` | from the seed | colour variety of the `--species` |
-| `--size N` or `WxH` | `32` | fit the animal into this canvas (16, 32, 64, 96, 128, 48x32...) |
+| `--size N` or `WxH` | `64` | fit the animal into this canvas (16, 32, 64, 96, 128, 48x32...) |
 | `--to-scale` | | draw animals to scale with each other instead of a fixed canvas |
 | `--px-per-m PX` | `16` | to scale: pixels per metre of animal |
 | `--min-px` / `--max-px` | `16` / `128` | to scale: small animals are drawn at least this long; the biggest are shrunk to fit a sprite this big |
@@ -185,6 +186,7 @@ and writes the sprite sheet, JSON and GIFs (`--formats all` for the rest).
 | `--swim-frames` | `8` | frames per swim cycle |
 | `--turn-frames` | `10` | frames per turn-around |
 | `--fps` | `10` | playback rate written into every format |
+| `--smoothness X`, `-x X` | `1` | multiplies swim frames, turn frames and fps together: `-x 3` is three times as smooth at the same speed |
 | `--pitch` | `0.25` | camera tilt (radians); higher shows more of the back |
 | `--formats` | all | any of `gif,sheet,godot,frames` |
 | `--count` | `1` | batch: consecutive seeds, one folder each |
@@ -204,10 +206,10 @@ and writes the sprite sheet, JSON and GIFs (`--formats all` for the rest).
 <img src="docs/images/sheet.png" alt="A 32x24 clownfish sprite sheet, one row per animation, shown at 3x" width="100%">
 
 ```
-out/fish_32px_42/
-  fish_32px_42.png     sprite sheet: one row per animation
-  fish_32px_42.json    frame rects, fps, loop flags, `next` animation, length, scale, palette, genome
-  fish_32px_42.tres    Godot 4 SpriteFrames (uses fish_32px_42.png)
+out/fish_64px_42/
+  fish_64px_42.png     sprite sheet: one row per animation
+  fish_64px_42.json    frame rects, fps, loop flags, `next` animation, length, scale, palette, genome
+  fish_64px_42.tres    Godot 4 SpriteFrames (uses fish_64px_42.png)
   gif/                 one GIF per animation + showcase.gif (the whole cycle)
   frames/<anim>/       individual PNG frames
 ```

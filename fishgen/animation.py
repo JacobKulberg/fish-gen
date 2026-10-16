@@ -106,6 +106,18 @@ def build_animations(swim_frames: int = 8, turn_frames: int = 10, fps: float = 1
     return anims
 
 
+def smooth_timing(swim_frames: int, turn_frames: int, fps: float, smoothness: float) -> tuple[int, int, float]:
+    """Frame counts and fps ``smoothness`` times as fluid at the same speed: 3 turns 8 swim
+    frames, 10 turn frames at 10 fps into 24 and 30 at 30 fps. The fps follows the rounded swim
+    frame count exactly, so a tail beat always lasts as long as it did."""
+    if smoothness <= 0:
+        raise ValueError(f"smoothness must be above 0, got {smoothness}")
+    swim = max(2, round(swim_frames * smoothness))
+    turn = max(2, round(turn_frames * smoothness))
+    return swim, turn, fps * swim / swim_frames
+
+
+DEFAULT_SIZE = 64  # sprites are N x N; drawing animals to scale is opt-in
 DEFAULT_PX_PER_M = 16.0  # a 1 m animal is 16 px long, a 4.7 m great white 75 px
 MIN_PX = 16  # the smallest animals are drawn at least this long, so there is something to see
 MAX_PX = 128  # and the biggest (whales) get a sprite no bigger than this
@@ -145,14 +157,17 @@ class FishSprite:
         return seq
 
 
-def generate(seed: int, width: int = 32, height: int = 32, swim_frames: int = 8, turn_frames: int = 10,
-             fps: float = 10.0, pitch: float = 0.25, genome: FishGenome | None = None,
+def generate(seed: int, width: int = DEFAULT_SIZE, height: int = DEFAULT_SIZE, swim_frames: int = 8,
+             turn_frames: int = 10, fps: float = 10.0, smoothness: float = 1.0, pitch: float = 0.25, genome: FishGenome | None = None,
              scale_by_size: bool = False, px_per_m: float = DEFAULT_PX_PER_M, min_px: int = MIN_PX,
              max_px: int = MAX_PX, style: str = "pixel", colors: int | None = None, outline: bool = True,
              threads: int | None = None) -> FishSprite:
     """Render every animation of an animal.
 
-    By default the animal is fitted into a ``width`` x ``height`` canvas (32 x 32).
+    By default the animal is fitted into a ``width`` x ``height`` canvas (64 x 64).
+
+    ``smoothness`` multiplies the frame counts and fps together (see ``smooth_timing``): 3 is
+    three times as fluid, swimming and turning at the same speed.
 
     With ``scale_by_size`` it is drawn at its real size instead, ``px_per_m`` pixels to the
     metre, on a canvas just big enough for every frame, so animals put side by side are to
@@ -166,6 +181,7 @@ def generate(seed: int, width: int = 32, height: int = 32, swim_frames: int = 8,
     if style not in STYLES:
         raise ValueError(f"style must be one of {STYLES}, got {style!r}")
     genome = genome or FishGenome.random(seed)
+    swim_frames, turn_frames, fps = smooth_timing(swim_frames, turn_frames, fps, smoothness)
     # Some animals ask for a steeper camera or a stiffer turn.
     anims = build_animations(swim_frames, turn_frames, fps, pitch + genome.camera_tilt, genome.turn_lag,
                              puff=genome.puff > 0)

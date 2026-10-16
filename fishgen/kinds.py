@@ -133,6 +133,7 @@ def _whale(seed: int, r: random.Random, variant: str | None) -> FishGenome:
     else:
         dorsal = _off()
     long_flippers = not dolphin and r.random() < 0.25
+    beak = U(0.07, 0.11) if dolphin else 0.0
     white = r.random() < 0.12
     hue = U(0.55, 0.65)
     val = U(0.9, 0.95) if white else U(0.12, 0.65)
@@ -144,13 +145,14 @@ def _whale(seed: int, r: random.Random, variant: str | None) -> FishGenome:
     fin = (_hex(hue, 0.05, 0.85) if r.random() < 0.25 else _hex(hue, 0.1, val * 0.85)) if val < 0.3 else None
     return _base(
         seed, "whale", height=U(0.2, 0.26) if dolphin else U(0.26, 0.32), thickness=U(0.75, 0.85),
-        peak=U(0.36, 0.42), nose=U(0.5, 0.65) if dolphin else U(0.7, 1.0), beak=U(0.07, 0.11) if dolphin else 0.0,
+        peak=U(0.36, 0.42), nose=U(0.5, 0.65) if dolphin else U(0.7, 1.0), beak=beak,
         melon=U(0.0, 0.015) if dolphin else 0.0, flat_head=0.0 if dolphin else U(0.0, 0.4),
         pectoral_shape="blade", pectoral_droop=U(0.6, 0.8), length_cm=U(180, 350) if dolphin else U(450, 1200),
         gloss=U(0.5, 0.7), fin_alpha=1.0, scars=U(0.1, 0.5) if not dolphin else U(0.0, 0.3),
         taper=U(1.2, 1.4), peduncle=U(0.1, 0.14), back_arch=0.5,
-        eye_pos=U(0.1, 0.14), eye_height=U(-0.1, 0.2), eye_size=U(0.12, 0.16), eye_style="dark",
-        swim_vertical=True, tail_shape="flukes", tail_length=U(0.18, 0.24), tail_spread=U(1.1, 1.6),
+        # A dolphin's eye sits behind the melon, over the corner of its mouth, not on the beak.
+        eye_pos=beak + U(0.06, 0.08) if dolphin else U(0.1, 0.14), eye_height=U(-0.1, 0.2),
+        eye_size=U(0.12, 0.16), eye_style="dark", swim_vertical=True, tail_shape="flukes", tail_length=U(0.18, 0.24), tail_spread=U(1.1, 1.6),
         dorsal=dorsal, pectoral_size=U(0.3, 0.38) if long_flippers else U(0.12, 0.2), pectoral_flap=0.15,
         swim_amplitude=U(0.4, 0.5), wave_count=U(0.5, 0.6),
         colors=_colors(hue, U(0.05, 0.3), val, U(0.4, 0.6) if white else U(0.6, 1.0), pattern, U(0.4, 0.8), 0.0,
@@ -316,7 +318,9 @@ def individualise(g: FishGenome, salt: str) -> FishGenome:
         g.tail_length *= U(0.86, 1.14)
         g.tail_spread *= U(0.86, 1.14)
         g.pectoral_size *= U(0.82, 1.2)
-        g.beak *= U(0.75, 1.25)
+        stretch = g.beak * (U(0.75, 1.25) - 1.0)
+        g.beak += stretch
+        g.eye_pos += stretch  # the eye stays the same distance behind the beak
         g.hammer *= U(0.85, 1.15)
         if g.dorsal.present:
             g.dorsal.height *= U(0.78, 1.22)

@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from fishgen import FishGenome, generate
-from fishgen.animation import SHOWCASE_ORDER, build_animations
+from fishgen.animation import SHOWCASE_ORDER, build_animations, smooth_timing
 from fishgen.cli import main, parse_size
 
 
@@ -183,6 +183,18 @@ def test_species_names_are_forgiving():
         parse_species("tang")
 
 
+def test_smoothness_multiplies_frames_and_fps_at_the_same_speed():
+    from fishgen.species import make_genome
+
+    assert smooth_timing(8, 10, 10.0, 3) == (24, 30, 30.0)
+    assert smooth_timing(8, 10, 10.0, 1) == (8, 10, 10.0)
+    swim, _, fps = smooth_timing(8, 10, 10.0, 1.3)  # rounded frames: the fps follows, so a beat lasts as long
+    assert swim / fps == pytest.approx(8 / 10.0)
+    s = generate(1, 24, 24, genome=make_genome("Clownfish", 1), swim_frames=2, turn_frames=2, smoothness=2)
+    assert len(s.animations["swim_right"].frames) == 4 and len(s.animations["turn_right_to_left"].frames) == 4
+    assert s.animations["swim_right"].fps == 20.0
+
+
 def test_sprite_command_makes_a_square_sprite(tmp_path):
     """``fishgen sprite NAME SIZE`` is the quick way to one N x N sprite of a species."""
     assert main(["sprite", "neon-tetra", "24", "--seed", "3", "--swim-frames", "2", "--turn-frames", "2",
@@ -191,11 +203,11 @@ def test_sprite_command_makes_a_square_sprite(tmp_path):
     data = json.loads((out / "neon_tetra_24px_3.json").read_text())
     assert data["meta"]["frame_size"] == [24, 24]
     assert (out / "gif" / "showcase.gif").exists() and not (out / "frames").exists()
-    # Without a size it is 32 x 32, and every animal gets the same canvas, not drawn to scale.
+    # Without a size it is 64 x 64, and every animal gets the same canvas, not drawn to scale.
     assert main(["sprite", "Humpback whale", "--seed", "1", "--swim-frames", "2", "--turn-frames", "2",
                  "--formats", "sheet", "--out", str(tmp_path)]) == 0
-    whale = json.loads((tmp_path / "humpback_whale_32px_1" / "humpback_whale_32px_1.json").read_text())
-    assert whale["meta"]["frame_size"] == [32, 32]
+    whale = json.loads((tmp_path / "humpback_whale_64px_1" / "humpback_whale_64px_1.json").read_text())
+    assert whale["meta"]["frame_size"] == [64, 64]
 
 
 def test_neon_tetra_tail_reads_in_pixel_art():

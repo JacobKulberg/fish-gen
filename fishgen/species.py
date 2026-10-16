@@ -335,13 +335,13 @@ OTHERS: dict[str, tuple[str, str, dict]] = {
                  accent2="#7d828c"),
     )),
     "Bottlenose dolphin": ("whale", "dolphin", dict(
-        beak=0.12, height=0.21, nose=0.6, melon=0.012, length_cm=300, gloss=0.7, scars=0.25,
+        beak=0.12, eye_pos=0.19, height=0.21, nose=0.6, melon=0.012, length_cm=300, gloss=0.7, scars=0.25,
         dorsal=dict(present=True, shape="falcate", start=0.42, end=0.56, height=0.13, sweep=0.75),
         colors=C(0.58, 0.12, 0.55, belly=0.8),
     )),
     "Common dolphin": ("whale", "dolphin", dict(
         # The tan-and-grey hourglass on each flank under a dark cape.
-        beak=0.09, height=0.2, nose=0.55, length_cm=220, gloss=0.7,
+        beak=0.09, eye_pos=0.16, height=0.2, nose=0.55, length_cm=220, gloss=0.7,
         dorsal=dict(present=True, shape="falcate", start=0.42, end=0.55, height=0.14, sweep=0.8),
         colors=C(0.62, 0.3, 0.2, belly_level=-0.4, pattern="dolphin_cape", scale=0.6, accent="#c8b07a",
                  accent2="#8a9098", fin="#20262f"),
