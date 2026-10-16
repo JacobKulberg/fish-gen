@@ -118,16 +118,18 @@ FISH: dict[str, tuple[str, dict]] = {
         colors=C(0.13, 0.6, 0.85, pattern="spots", scale=0.6, accent="#4a3a24", fin="#e8d27a"),
     )),
     "Betta": ("classic", dict(
-        # Siamese fighting fish: huge flowing translucent fins with an iridescent sheen.
-        length_cm=6.5, height=0.32, tail_shape="fan", tail_length=0.5, tail_spread=1.6, scales=0.03,
-        silver=0.25, fin_alpha=0.55, iris_color="#3a2020",
-        dorsal=dict(present=True, shape="sail", start=0.45, end=0.85, height=0.24, sweep=0.9),
-        anal=dict(present=True, shape="long", start=0.35, end=0.95, height=0.24, sweep=0.8),
-        pelvic=dict(present=True, height=0.18),
-        colors=C(0.97, 0.85, 0.72, belly=0.0),
+        # Siamese fighting fish: huge, flowing fins that fold and ripple like cloth (billow), a
+        # halfmoon tail as tall as the fish is long, and a deep anal fin draping back under it.
+        length_cm=6.5, height=0.3, tail_shape="fan", tail_length=0.55, tail_spread=2.6, scales=0.03,
+        silver=0.25, fin_alpha=0.85, tail_alpha=0.88, iris_color="#3a2020", billow=1.0,
+        swim_amplitude=0.25, mouth=0.03, mouth_height=0.1,
+        dorsal=dict(present=True, shape="sail", start=0.55, end=0.93, height=0.26, sweep=1.0),
+        anal=dict(present=True, shape="sail", start=0.38, end=0.99, height=0.36, sweep=1.0),
+        pelvic=dict(present=True, start=0.34, height=0.2),
+        colors=C(0.97, 0.85, 0.72, belly=0.0, fin="#c41a2a"),
         morphs=[
             ("Red", 3, {}),
-            ("Royal blue", 3, dict(colors=dict(hue=0.62, saturation=0.85, value=0.8))),
+            ("Royal blue", 3, dict(colors=dict(hue=0.62, saturation=0.85, value=0.8, fin_color="#2c5ad8"))),
             ("Black orchid", 1, dict(colors=dict(hue=0.72, saturation=0.5, value=0.18, fin_color="#3a2a58",
                                                  fin_edge_color="#b8c0e8"))),
             ("Koi", 1, dict(colors=dict(hue=0.1, saturation=0.06, value=0.92, pattern="calico",

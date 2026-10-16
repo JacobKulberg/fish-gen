@@ -144,6 +144,7 @@ GENE_TABS: list[tuple[str, list[tuple[str, tuple | None, list[tuple]]]]] = [
             ("Pectoral angle", "pectoral_droop", "float", (0.2, 1.6)),
             ("Fin flutter", "pectoral_flap", "float", (0.0, 1.0)),
             ("Fin opacity", "fin_alpha", "float", (0.1, 1.0)),
+            ("Flowing fins", "billow", "float", (0.0, 1.0)),
             ("Finlets", "finlets", "int", (0, 10)),
             ("Pelvic fins", "pelvic.present", "bool", None),
             ("Pelvic position", "pelvic.start", "float", (0.2, 0.6)),

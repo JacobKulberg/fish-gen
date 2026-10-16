@@ -311,7 +311,12 @@ class FishModel:
             half = self._fin_thickness(R, M, self.half_width(ra)[None, :] * 0.4)
             for side in ((-1.0, 1.0) if half is not None else (0.0,)):
                 off = 0.0 if half is None else side * half
-                add_grid(np.stack([va, vy, off + 0 * va], -1), np.stack([M, R, va, 0 * va], -1), part)
+                v, at = np.stack([va, vy, off + 0 * va], -1), np.stack([M, R, va, 0 * va], -1)
+                if g.billow > 0:
+                    folds = 2.0 + 7.0 * (fg.end - fg.start)
+                    add_dynamic(self._billow_fn(v, R, M, folds, float(h.max())), at, part)
+                else:
+                    add_grid(v, at, part)
 
         median_fin(g.dorsal, DORSAL, 1.0)
         median_fin(g.dorsal2, DORSAL, 1.0)
@@ -347,7 +352,10 @@ class FishModel:
             for side in ((-1.0, 1.0) if half is not None else (0.0,)):
                 off = 0.0 if half is None else side * half
                 v = np.stack([va, off + 0 * va, vy], -1) if flat else np.stack([va, vy, off + 0 * va], -1)
-                add_grid(v, at, CAUDAL)
+                if g.billow > 0 and not flat:
+                    add_dynamic(self._billow_fn(v, np.broadcast_to(R, va.shape), M, 6.0, g.tail_length), at, CAUDAL)
+                else:
+                    add_grid(v, at, CAUDAL)
 
         # Paired fins hang off the flanks. Their shapes are stored in "fin space"
         # (u back along the body, v down) and placed per pose because they flap.
@@ -477,6 +485,34 @@ class FishModel:
             self.mouth = np.zeros((0, 0, 3))
 
     # ------------------------------------------------------------------ extra parts
+    def _billow_fn(self, v: np.ndarray, R: np.ndarray, M: np.ndarray, folds: float, size: float):
+        """Cloth-like fin (bettas): the rest grid ``v`` (R 0 at the root to 1 at the edge, M along
+        it) folds into soft pleats that roll outwards from the body, and its edge scallops and
+        trails each stroke, the outer membrane moving most."""
+        b = self.g.billow
+        root = v[:1]
+        w = R[..., None] ** 1.5
+        # Unit direction along the fin (M), for the edge trailing back and forth.
+        tang = np.gradient(v, axis=1)
+        tang /= np.linalg.norm(tang, axis=-1, keepdims=True) + 1e-9
+        rest_fold = 2 * math.pi * folds * M + 3.5 * R
+
+        def fn(pose):
+            t = 0.0 if pose is None else 2 * math.pi * pose.phase
+            amp = 1.0 if pose is None else 0.5 + 0.5 * pose.amplitude
+            wave = np.sin(rest_fold - t)[..., None]
+            # Pleats: the membrane bows in and out of its plane, which shades into light and dark folds.
+            z = b * amp * size * 0.3 * w * wave
+            # Scalloped, rippling edge: points slide out from / back towards the root...
+            scallop = b * 0.08 * w * (0.4 * np.sin(2 * math.pi * folds * M + 1.3) + 0.25 * np.sin(2 * math.pi * 2.7 * folds * M)
+                                      )[..., None] + b * 0.035 * amp * w * wave
+            # ...and the outer membrane sways along the fin, lagging the stroke.
+            sway = b * amp * size * 0.08 * w * np.sin(t - 2.2 * R)[..., None] * tang
+            out = root + (v - root) * (1.0 + scallop) + sway
+            return out + np.array([0.0, 0.0, 1.0]) * z, None
+
+        return fn
+
     _wing_r = np.linspace(0.0, 1.0, 7)
 
     def _wing_fn(self, w: WingGenes, side: float):

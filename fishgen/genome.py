@@ -167,6 +167,7 @@ class FishGenome:
     scales: float = 0.0  # scale size relative to body length (0 = smooth skin: sharks, whales, eels)
     fin_alpha: float = 0.8  # fin membrane opacity (1 = fleshy, opaque fins)
     tail_alpha: float | None = None  # tail fin opacity when it differs from fin_alpha
+    billow: float = 0.0  # 0 = stiff fins .. 1 = long, cloth-like fins that fold and ripple (bettas)
     iris_color: str | None = None  # "#rrggbb" ring round the pupil (None: picked from the kind)
     finlets: int = 0  # little yellow tuna finlets along the back and belly in front of the tail
     scars: float = 0.0  # pale scratches and nicks in the skin (old sharks and whales)
